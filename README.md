@@ -70,7 +70,7 @@ Pour activer les notifications :
 ## Installation
 
 ### Option 1 : Installation Manuelle
-1. Téléchargez la dernière version depuis le [dépôt GitHub](https://github.com/morgeek/eau_grand_lyon_component).
+1. Téléchargez la dernière version depuis le [dépôt GitHub](https://github.com/morgeek/HA-Plugin-pour-Eau-du-Grand-Lyon).
 2. Extrayez le contenu du dossier `custom_components/eau_grand_lyon/` dans le répertoire `custom_components/` de votre Home Assistant.
 3. Redémarrez Home Assistant.
 
@@ -114,4 +114,4 @@ Les contributions sont les bienvenues ! N'hésitez pas à proposer des features
 Ce projet est sous licence MIT - voir le fichier LICENSE pour plus de détails.
 
 ## Avertissement
-Cette intégration n'est pas officiellement affiliée à Eau du Grand Lyon ou Grand Lyon Métropole. Utilisez à vos propres risques.</content>
+Cette intégration n'est pas officiellement affiliée à Eau du Grand Lyon ou Grand Lyon Métropole. Utilisez à vos propres risques.
