@@ -92,8 +92,8 @@ L'intégration récupérera automatiquement les données toutes les 6 heures (ca
 ## Utilisation
 Une fois configuré, les capteurs apparaîtront dans votre tableau de bord Home Assistant. Vous pouvez les utiliser dans des automatisations, des tableaux de bord, ou de toute autre manière que vous utilisez les capteurs dans Home Assistant.
 
-### Notifications Intelligentes
-L'intégration inclut un système complet de notifications intelligentes. Consultez la [documentation détaillée](docs/NOTIFICATIONS.md) pour :
+### Notifications Intelligentes *(temporairement désactivé)*
+L'intégration inclut un système complet de notifications intelligentes pour :
 - Configuration des services Pushover/Telegram
 - Paramétrage des alertes vocales Google Home/Alexa
 - Automatisations prédéfinies pour la détection de fuites
@@ -104,13 +104,9 @@ L'intégration inclut un système complet de notifications intelligentes. Consul
 - **Aucune donnée** : Les données eau sont mises à jour mensuellement. Si aucune donnée n'apparaît, vérifiez le statut de votre contrat.
 - **Erreurs** : Vérifiez les journaux Home Assistant pour tout message d'erreur lié à l'intégration.
 
-## Roadmap & Suggestions de Features
-
 ### Fonctionnalités à venir
-
 **Multi-utilisateurs**
    - Support pour plusieurs comptes utilisateur
-   - Partage de données entre membres de la famille
 
 ### Contributions
 Les contributions sont les bienvenues ! N'hésitez pas à proposer des features
