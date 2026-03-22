@@ -7,7 +7,10 @@ import logging
 
 import aiohttp
 
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import (
     AuthenticationError,
@@ -108,13 +111,13 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
         self._min_request_delay = timedelta(seconds=30)  # Rate limiting: 30s min entre requêtes
         # Cache persistant pour l'historique
         self._store = Store(hass, 1, f"{DOMAIN}_{entry.entry_id}_history")
-        # Charger les données persistantes
-        self._load_persistent_data()
+        # Charger les données persistantes au démarrage
+        hass.async_create_task(self._load_persistent_data())
 
-    def _load_persistent_data(self) -> None:
+    async def _load_persistent_data(self) -> None:
         """Charge les données persistantes depuis le store."""
         try:
-            stored = self._store.async_load_sync()
+            stored = await self._store.async_load()
             if stored:
                 self.data = stored
                 _LOGGER.debug("Données persistantes chargées")
@@ -431,20 +434,24 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
         notif_id = f"{DOMAIN}_alertes"
 
         if nb_alertes > 0 and nb_alertes != self._prev_nb_alertes:
-            pn_create(
-                self.hass,
-                message=(
-                    f"Vous avez **{nb_alertes} alerte(s) active(s)** sur votre compte "
-                    f"Eau du Grand Lyon.\n\n"
-                    f"Consultez [l'espace client](https://agence.eaudugrandlyon.com)."
-                ),
-                title="⚠️ Eau du Grand Lyon — Alerte",
-                notification_id=notif_id,
+            self.hass.async_create_task(
+                pn_create(
+                    self.hass,
+                    message=(
+                        f"Vous avez **{nb_alertes} alerte(s) active(s)** sur votre compte "
+                        f"Eau du Grand Lyon.\n\n"
+                        f"Consultez [l'espace client](https://agence.eaudugrandlyon.com)."
+                    ),
+                    title="⚠️ Eau du Grand Lyon — Alerte",
+                    notification_id=notif_id,
+                )
             )
             _LOGGER.info("%d alerte(s) Eau du Grand Lyon détectée(s)", nb_alertes)
 
         elif nb_alertes == 0 and self._prev_nb_alertes > 0:
-            pn_dismiss(self.hass, notification_id=notif_id)
+            self.hass.async_create_task(
+                pn_dismiss(self.hass, notification_id=notif_id)
+            )
             _LOGGER.info("Alertes Eau du Grand Lyon résolues")
 
         self._prev_nb_alertes = nb_alertes
