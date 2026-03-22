@@ -53,6 +53,35 @@ mode: single
 
 ---
 # ═══════════════════════════════════════════════════════════════════
+#  Automation bonus : Alertes API et statut
+#  Envoie une notification si statut API KO
+# ═══════════════════════════════════════════════════════════════════
+
+alias: "Eau Grand Lyon — Alerte statut API KO"
+description: >
+  Envoie une notification si l'intégration ne peut pas récupérer les données
+  (statut sensor.eau_du_grand_lyon_statut_api KO).
+
+trigger:
+  - platform: state
+    entity_id: sensor.eau_du_grand_lyon_statut_api
+    to: "KO"
+
+condition: []
+
+action:
+  - service: notify.persistent_notification
+    data:
+      title: "⚠️ Eau du Grand Lyon : statut API KO"
+      message: >
+        Le statut API est KO.
+        Dernière erreur : {{ state_attr('sensor.eau_du_grand_lyon_statut_api', 'last_error') }}
+        Type : {{ state_attr('sensor.eau_du_grand_lyon_statut_api', 'last_error_type') }}
+
+mode: single
+
+---
+# ═══════════════════════════════════════════════════════════════════
 #  Automation bonus : Alerte dépassement de consommation
 #  Déclenche une notification si la conso mensuelle dépasse un seuil
 # ═══════════════════════════════════════════════════════════════════

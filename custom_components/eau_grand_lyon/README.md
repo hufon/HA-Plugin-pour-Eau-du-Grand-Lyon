@@ -40,6 +40,12 @@ Elle inclut également un bouton pour déclencher manuellement une mise à jour 
 - Template d'automatisation : `lovelace/automation_refresh.yaml`
 - Rafraîchissement quotidien à 6h du matin
 - Alerte de dépassement de consommation paramétrable
+- Alerte API KO : notification automatique si `sensor.eau_du_grand_lyon_statut_api` passe à KO (données introuvables / erreur authentification / WAF)
+
+### Capteur de santé API
+- `sensor.eau_du_grand_lyon_statut_api` : OK / KO / INCONNU
+- Attributs : `last_update_success_time`, `last_error`, `last_error_type`
+- Utilisé par le dashboard et l'automation, permet un diagnostic immédiat.
 
 ## Prérequis
 

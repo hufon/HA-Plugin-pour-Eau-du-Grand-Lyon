@@ -105,8 +105,24 @@ views:
         entities:
           - entity: sensor.eau_du_grand_lyon_derniere_mise_a_jour
             name: Dernière mise à jour
+          - entity: sensor.eau_du_grand_lyon_statut_api
+            name: Statut API
           - entity: button.eau_du_grand_lyon_forcer_la_mise_a_jour
             name: Forcer la mise à jour
+
+      # ── Alerte statut API KO ─────────────────────────────────────
+      - type: conditional
+        conditions:
+          - entity: sensor.eau_du_grand_lyon_statut_api
+            state: "KO"
+        card:
+          type: markdown
+          content: >
+            ## ❌ Statut API KO
+            Le capteur `statut_api` indique une erreur :
+            - erreur : `{{ state_attr('sensor.eau_du_grand_lyon_statut_api', 'last_error') }}`
+            - type : `{{ state_attr('sensor.eau_du_grand_lyon_statut_api', 'last_error_type') }}`
+            Merci de vérifier vos identifiants et les paramètres réseau.
 
       # ── Alerte conditionnelle ─────────────────────────────────────
       - type: conditional
