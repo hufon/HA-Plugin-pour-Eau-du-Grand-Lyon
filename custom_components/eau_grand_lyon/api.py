@@ -1,6 +1,7 @@
 """Client API pour Eau du Grand Lyon (authentification PKCE + données contrat)."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import logging
@@ -47,13 +48,28 @@ _CONTRACTS_SELECT = (
 )
 _CONTRACTS_EXPAND = "conditionPaiement(compteClient),servicesSouscrits,espaceDeLivraison"
 
+# Retry parameters
+_RETRY_DELAYS = (5.0, 30.0, 90.0)  # délais en secondes entre les tentatives
+
 
 class AuthenticationError(Exception):
-    """Erreur d'authentification."""
+    """Erreur d'authentification (identifiants invalides ou flux OAuth échoué)."""
+
+
+class WafBlockedError(Exception):
+    """Le WAF Apache a bloqué la requête (HTTP 403).
+
+    Causes possibles : trop de requêtes en peu de temps, ou présence de
+    headers Sec-Fetch-* dans la requête.
+    """
 
 
 class ApiError(Exception):
-    """Erreur lors d'un appel API."""
+    """Erreur générique lors d'un appel API (hors auth et WAF)."""
+
+
+class NetworkError(Exception):
+    """Erreur réseau / timeout lors d'un appel API."""
 
 
 def _compute_code_challenge(verifier: str) -> str:
@@ -112,14 +128,19 @@ class EauGrandLyonApi:
                 login_body = await resp.text()
                 login_status = resp.status
         except aiohttp.ClientError as err:
-            raise AuthenticationError(f"Impossible de joindre le serveur: {err}") from err
+            raise NetworkError(f"Impossible de joindre le serveur: {err}") from err
 
         if login_status == 401:
             raise AuthenticationError(
                 "Identifiants incorrects. Vérifiez votre email et mot de passe."
             )
+        if login_status == 403:
+            raise WafBlockedError(
+                "Le WAF a bloqué la requête de login (HTTP 403). "
+                "Attendez quelques minutes avant de réessayer."
+            )
         if login_status not in (200, 204):
-            raise AuthenticationError(
+            raise ApiError(
                 f"Login échoué ({login_status}): {login_body[:200]}"
             )
 
@@ -141,9 +162,15 @@ class EauGrandLyonApi:
                 headers=BROWSER_NAV_HEADERS,
                 allow_redirects=True,
             ) as resp:
+                if resp.status == 403:
+                    raise WafBlockedError(
+                        "Le WAF a bloqué la requête authorize-internet (HTTP 403)."
+                    )
                 final_url = str(resp.url)
+        except WafBlockedError:
+            raise
         except aiohttp.ClientError as err:
-            raise AuthenticationError(f"Erreur sur /authorize-internet: {err}") from err
+            raise NetworkError(f"Erreur réseau sur /authorize-internet: {err}") from err
 
         code = self._extract_code_from_url(final_url)
         if not code:
@@ -178,14 +205,20 @@ class EauGrandLyonApi:
                 data=token_data,
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             ) as resp:
+                if resp.status == 403:
+                    raise WafBlockedError(
+                        "Le WAF a bloqué l'échange de token (HTTP 403)."
+                    )
                 if resp.status != 200:
                     body = await resp.text()
                     raise AuthenticationError(
                         f"Échange de token échoué ({resp.status}): {body[:200]}"
                     )
                 result: dict = await resp.json(content_type=None)
+        except (WafBlockedError, AuthenticationError):
+            raise
         except aiohttp.ClientError as err:
-            raise AuthenticationError(f"Requête token échouée: {err}") from err
+            raise NetworkError(f"Requête token échouée: {err}") from err
 
         if "access_token" not in result:
             raise AuthenticationError(f"Pas d'access_token dans la réponse: {result}")
@@ -203,38 +236,64 @@ class EauGrandLyonApi:
             await self.authenticate()
 
     async def _get(self, path: str) -> Any:
-        """GET authentifié avec retry sur 401."""
+        """GET authentifié avec retry sur 401 (token expiré)."""
         await self._ensure_auth()
         url = f"{BASE_URL}{path}"
         headers = {"Authorization": f"Bearer {self._access_token}"}
 
-        async with self._session.get(url, headers=headers) as resp:
-            if resp.status == 401:
-                _LOGGER.debug("Token expiré, ré-authentification...")
-                await self.authenticate()
-                headers = {"Authorization": f"Bearer {self._access_token}"}
-                async with self._session.get(url, headers=headers) as resp2:
-                    resp2.raise_for_status()
-                    return await resp2.json(content_type=None)
-            resp.raise_for_status()
-            return await resp.json(content_type=None)
+        try:
+            async with self._session.get(url, headers=headers) as resp:
+                if resp.status == 401:
+                    _LOGGER.debug("Token expiré, ré-authentification...")
+                    await self.authenticate()
+                    headers = {"Authorization": f"Bearer {self._access_token}"}
+                    async with self._session.get(url, headers=headers) as resp2:
+                        if resp2.status == 403:
+                            raise WafBlockedError(
+                                f"WAF 403 sur GET {path} (après ré-auth)."
+                            )
+                        resp2.raise_for_status()
+                        return await resp2.json(content_type=None)
+                if resp.status == 403:
+                    raise WafBlockedError(f"WAF 403 sur GET {path}.")
+                resp.raise_for_status()
+                return await resp.json(content_type=None)
+        except (WafBlockedError, AuthenticationError):
+            raise
+        except aiohttp.ClientResponseError as err:
+            raise ApiError(f"HTTP {err.status} sur GET {path}: {err.message}") from err
+        except aiohttp.ClientError as err:
+            raise NetworkError(f"Erreur réseau sur GET {path}: {err}") from err
 
     async def _post(self, path: str, body: dict | None = None) -> Any:
-        """POST authentifié avec retry sur 401."""
+        """POST authentifié avec retry sur 401 (token expiré)."""
         await self._ensure_auth()
         url = f"{BASE_URL}{path}"
         headers = {"Authorization": f"Bearer {self._access_token}"}
 
-        async with self._session.post(url, json=body or {}, headers=headers) as resp:
-            if resp.status == 401:
-                _LOGGER.debug("Token expiré, ré-authentification...")
-                await self.authenticate()
-                headers = {"Authorization": f"Bearer {self._access_token}"}
-                async with self._session.post(url, json=body or {}, headers=headers) as resp2:
-                    resp2.raise_for_status()
-                    return await resp2.json(content_type=None)
-            resp.raise_for_status()
-            return await resp.json(content_type=None)
+        try:
+            async with self._session.post(url, json=body or {}, headers=headers) as resp:
+                if resp.status == 401:
+                    _LOGGER.debug("Token expiré, ré-authentification...")
+                    await self.authenticate()
+                    headers = {"Authorization": f"Bearer {self._access_token}"}
+                    async with self._session.post(url, json=body or {}, headers=headers) as resp2:
+                        if resp2.status == 403:
+                            raise WafBlockedError(
+                                f"WAF 403 sur POST {path} (après ré-auth)."
+                            )
+                        resp2.raise_for_status()
+                        return await resp2.json(content_type=None)
+                if resp.status == 403:
+                    raise WafBlockedError(f"WAF 403 sur POST {path}.")
+                resp.raise_for_status()
+                return await resp.json(content_type=None)
+        except (WafBlockedError, AuthenticationError):
+            raise
+        except aiohttp.ClientResponseError as err:
+            raise ApiError(f"HTTP {err.status} sur POST {path}: {err.message}") from err
+        except aiohttp.ClientError as err:
+            raise NetworkError(f"Erreur réseau sur POST {path}: {err}") from err
 
     # ------------------------------------------------------------------
     # API métier
@@ -261,6 +320,72 @@ class EauGrandLyonApi:
         entries.sort(key=lambda x: (int(x["annee"]), int(x["mois"])))
         return entries
 
+    async def get_daily_consumptions(
+        self, contract_id: str, nb_jours: int = 90
+    ) -> list[dict]:
+        """Tente de récupérer les consommations journalières (données Téléo/TIC).
+
+        Certains compteurs communicants remontent des données quotidiennes.
+        Retourne une liste vide si l'endpoint n'est pas disponible ou si le
+        compteur ne supporte pas les relevés journaliers.
+
+        Format attendu de chaque entrée :
+            {"date": "YYYY-MM-DD", "consommation": <float>, ...}
+        """
+        # Deux patterns d'endpoint observés selon les versions de l'API
+        endpoints = [
+            (
+                f"/application/rest/interfaces/ael/contrats/{contract_id}"
+                f"/consommationsJournalieres?nbJours={nb_jours}"
+            ),
+            (
+                f"/application/rest/interfaces/ael/contrats/{contract_id}"
+                f"/consommationsDailyPeriode?nbJours={nb_jours}"
+            ),
+        ]
+
+        for endpoint in endpoints:
+            try:
+                data = await self._get(endpoint)
+                entries: list[dict] = []
+                # Format postes (identique aux données mensuelles)
+                if isinstance(data, dict) and "postes" in data:
+                    for poste in data.get("postes", []):
+                        entries.extend(poste.get("data", []))
+                # Format tableau direct
+                elif isinstance(data, list):
+                    entries = data
+
+                if entries:
+                    entries.sort(key=lambda x: x.get("date", ""))
+                    _LOGGER.debug(
+                        "Données journalières disponibles pour contrat %s : %d entrées",
+                        contract_id, len(entries),
+                    )
+                    return entries
+
+            except ApiError as err:
+                # 404 = endpoint inexistant → pas de données journalières
+                if "404" in str(err):
+                    _LOGGER.debug(
+                        "Endpoint journalier non disponible pour contrat %s (%s)",
+                        contract_id, endpoint.split("/")[-1].split("?")[0],
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Données journalières non disponibles pour contrat %s : %s",
+                        contract_id, err,
+                    )
+                continue
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug(
+                    "Données journalières non disponibles pour contrat %s",
+                    contract_id,
+                )
+                continue
+
+        return []
+
     async def get_alertes(self) -> list[dict]:
         """Retourne la liste des alertes actives (tous contrats)."""
         try:
@@ -279,7 +404,7 @@ class EauGrandLyonApi:
 
     @staticmethod
     def format_consumptions(raw_entries: list[dict]) -> list[dict]:
-        """Enrichit les entrées brutes avec labels lisibles et calculs."""
+        """Enrichit les entrées mensuelles brutes avec labels lisibles."""
         result = []
         for e in raw_entries:
             mois_idx = int(e["mois"])
@@ -294,6 +419,19 @@ class EauGrandLyonApi:
         return result
 
     @staticmethod
+    def format_daily_consumptions(raw_entries: list[dict]) -> list[dict]:
+        """Enrichit les entrées journalières brutes (si disponibles)."""
+        result = []
+        for e in raw_entries:
+            date_str = e.get("date", "")
+            conso = e.get("consommation", 0)
+            result.append({
+                "date": date_str,
+                "consommation_m3": float(conso),
+            })
+        return result
+
+    @staticmethod
     def parse_contract_details(raw: dict) -> dict:
         """Extrait les champs utiles d'un contrat brut (depuis rechercher)."""
         ref = raw.get("reference", "")
@@ -301,7 +439,6 @@ class EauGrandLyonApi:
 
         date_effet_raw = raw.get("dateEffet") or ""
         date_echeance_raw = raw.get("dateEcheance") or ""
-        # Garder uniquement la partie date (YYYY-MM-DD)
         date_effet = date_effet_raw[:10] if date_effet_raw else None
         date_echeance = date_echeance_raw[:10] if date_echeance_raw else None
 

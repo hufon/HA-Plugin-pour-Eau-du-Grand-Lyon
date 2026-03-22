@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -32,26 +32,31 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
-    for ref, contract in (coordinator.data or {}).get("contracts", {}).items():
+    for ref, _contract in (coordinator.data or {}).get("contracts", {}).items():
         # ── Tableau de bord Énergie HA ────────────────────────────────
         entities.append(EauGrandLyonIndexSensor(coordinator, entry, ref))
-        # ── Consommations ─────────────────────────────────────────────
+        # ── Consommations mensuelles ──────────────────────────────────
         entities.append(
             EauGrandLyonConsommationSensor(coordinator, entry, ref, "courant")
         )
         entities.append(
             EauGrandLyonConsommationSensor(coordinator, entry, ref, "precedent")
         )
-        entities.append(
-            EauGrandLyonConsommationAnnuelleSensor(coordinator, entry, ref)
-        )
+        entities.append(EauGrandLyonConsommationAnnuelleSensor(coordinator, entry, ref))
+        # ── Consommations journalières (si compteur compatible) ───────
+        entities.append(EauGrandLyonConso7JSensor(coordinator, entry, ref))
+        entities.append(EauGrandLyonConso30JSensor(coordinator, entry, ref))
+        # ── Coûts estimés ─────────────────────────────────────────────
+        entities.append(EauGrandLyonCoutMoisSensor(coordinator, entry, ref))
+        entities.append(EauGrandLyonCoutAnnuelSensor(coordinator, entry, ref))
         # ── Compte & contrat ──────────────────────────────────────────
         entities.append(EauGrandLyonSoldeSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonStatutSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonDateEcheanceSensor(coordinator, entry, ref))
 
-    # ── Alertes (global, pas par contrat) ─────────────────────────────
+    # ── Sensors globaux ───────────────────────────────────────────────
     entities.append(EauGrandLyonAlertesSensor(coordinator, entry))
+    entities.append(EauGrandLyonLastUpdateSensor(coordinator, entry))
 
     async_add_entities(entities, update_before_add=True)
 
@@ -86,7 +91,6 @@ class _EauGrandLyonBase(CoordinatorEntity[EauGrandLyonCoordinator], SensorEntity
         calibre = self._contract.get("calibre_compteur", "")
         usage = self._contract.get("usage", "")
         model_parts = [p for p in [calibre and f"DN{calibre}", usage] if p]
-        # Numéro de compteur (référence PDS physique, ex. "71233HC1")
         numero_compteur = (
             self._contract.get("reference_pds")
             or self._contract.get("reference", self._contract_ref)
@@ -106,13 +110,7 @@ class _EauGrandLyonBase(CoordinatorEntity[EauGrandLyonCoordinator], SensorEntity
 # ══════════════════════════════════════════════════════════════════════
 
 class EauGrandLyonIndexSensor(_EauGrandLyonBase):
-    """Index cumulatif de consommation d'eau (somme de tous les mois disponibles).
-
-    Ce sensor a state_class=TOTAL_INCREASING, ce qui permet de l'ajouter
-    directement dans le tableau de bord Énergie de Home Assistant (section Eau).
-    La valeur augmente chaque mois quand de nouvelles données sont publiées.
-    L'écart mensuel est calculé automatiquement par HA pour les graphiques.
-    """
+    """Index cumulatif (TOTAL_INCREASING) — Tableau de bord Énergie HA."""
 
     _attr_device_class = SensorDeviceClass.WATER
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -121,12 +119,7 @@ class EauGrandLyonIndexSensor(_EauGrandLyonBase):
     _attr_name = "Index cumulatif"
     _attr_suggested_display_precision = 1
 
-    def __init__(
-        self,
-        coordinator: EauGrandLyonCoordinator,
-        entry: ConfigEntry,
-        contract_ref: str,
-    ) -> None:
+    def __init__(self, coordinator, entry, contract_ref):
         super().__init__(coordinator, entry, contract_ref)
         self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_index_cumulatif"
 
@@ -140,23 +133,23 @@ class EauGrandLyonIndexSensor(_EauGrandLyonBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         consos = self._contract.get("consommations", [])
+        manquants = self._contract.get("mois_manquants", [])
         return {
             "premier_relevé": consos[0]["label"] if consos else None,
             "dernier_relevé": consos[-1]["label"] if consos else None,
             "nb_mois_inclus": len(consos),
-            "note": (
-                "Somme cumulée des relevés disponibles via l'API. "
-                "Utilisez ce sensor dans Énergie → Eau."
-            ),
+            "mois_manquants": manquants,
+            "nb_mois_manquants": len(manquants),
+            "note": "Somme cumulée — historique injecté dans les statistiques HA.",
         }
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Consommations mensuelles (mois courant et mois précédent)
+# Consommations mensuelles
 # ══════════════════════════════════════════════════════════════════════
 
 class EauGrandLyonConsommationSensor(_EauGrandLyonBase):
-    """Consommation d'eau pour le mois courant ou précédent (m³)."""
+    """Consommation du mois courant ou précédent (m³)."""
 
     _attr_device_class = SensorDeviceClass.WATER
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -164,29 +157,24 @@ class EauGrandLyonConsommationSensor(_EauGrandLyonBase):
     _attr_icon = "mdi:water"
     _attr_suggested_display_precision = 1
 
-    def __init__(
-        self,
-        coordinator: EauGrandLyonCoordinator,
-        entry: ConfigEntry,
-        contract_ref: str,
-        period: str,  # "courant" | "precedent"
-    ) -> None:
+    def __init__(self, coordinator, entry, contract_ref, period: str):
         super().__init__(coordinator, entry, contract_ref)
         self._period = period
-        if period == "courant":
-            self._attr_name = "Consommation mois courant"
-        else:
-            self._attr_name = "Consommation mois précédent"
-        self._attr_unique_id = (
-            f"{entry.entry_id}_{contract_ref}_conso_{period}"
+        self._attr_name = (
+            "Consommation mois courant"
+            if period == "courant"
+            else "Consommation mois précédent"
         )
+        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_conso_{period}"
 
     @property
     def native_value(self) -> float | None:
         c = self._contract
-        if self._period == "courant":
-            return c.get("consommation_mois_courant")
-        return c.get("consommation_mois_precedent")
+        return (
+            c.get("consommation_mois_courant")
+            if self._period == "courant"
+            else c.get("consommation_mois_precedent")
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -196,17 +184,26 @@ class EauGrandLyonConsommationSensor(_EauGrandLyonBase):
 
         if self._period == "courant":
             attrs["période"] = c.get("label_mois_courant", "")
+
             prev = c.get("consommation_mois_precedent")
             curr = c.get("consommation_mois_courant")
             if prev is not None and curr is not None:
-                attrs["variation_m3"] = round(curr - prev, 1)
-                attrs["variation_pct"] = (
+                attrs["variation_vs_mois_precedent_m3"] = round(curr - prev, 1)
+                attrs["variation_vs_mois_precedent_pct"] = (
                     round((curr - prev) / prev * 100, 1) if prev != 0 else None
+                )
+
+            n1 = c.get("consommation_n1")
+            if n1 is not None and curr is not None:
+                attrs["consommation_n1_m3"] = n1
+                attrs["période_n1"] = c.get("label_n1", "")
+                attrs["variation_vs_n1_m3"] = round(curr - n1, 1)
+                attrs["variation_vs_n1_pct"] = (
+                    round((curr - n1) / n1 * 100, 1) if n1 != 0 else None
                 )
         else:
             attrs["période"] = c.get("label_mois_precedent", "")
 
-        # Historique complet (tous les mois disponibles)
         attrs["historique"] = [
             {"période": e["label"], "consommation_m3": e["consommation_m3"]}
             for e in consos
@@ -216,11 +213,11 @@ class EauGrandLyonConsommationSensor(_EauGrandLyonBase):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Consommation annuelle (somme glissante 12 mois)
+# Consommation annuelle
 # ══════════════════════════════════════════════════════════════════════
 
 class EauGrandLyonConsommationAnnuelleSensor(_EauGrandLyonBase):
-    """Consommation totale des 12 derniers mois disponibles (m³)."""
+    """Consommation totale des 12 derniers mois (m³)."""
 
     _attr_device_class = SensorDeviceClass.WATER
     _attr_state_class = SensorStateClass.TOTAL
@@ -229,19 +226,13 @@ class EauGrandLyonConsommationAnnuelleSensor(_EauGrandLyonBase):
     _attr_name = "Consommation annuelle (12 mois)"
     _attr_suggested_display_precision = 1
 
-    def __init__(
-        self,
-        coordinator: EauGrandLyonCoordinator,
-        entry: ConfigEntry,
-        contract_ref: str,
-    ) -> None:
+    def __init__(self, coordinator, entry, contract_ref):
         super().__init__(coordinator, entry, contract_ref)
         self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_conso_annuelle"
 
     @property
     def native_value(self) -> float | None:
-        c = self._contract
-        return c.get("consommation_annuelle")
+        return self._contract.get("consommation_annuelle")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -260,11 +251,149 @@ class EauGrandLyonConsommationAnnuelleSensor(_EauGrandLyonBase):
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Consommations journalières (si compteur compatible Téléo/TIC)
+# ══════════════════════════════════════════════════════════════════════
+
+class _EauGrandLyonDailyBase(_EauGrandLyonBase):
+    """Base pour les sensors journaliers — unavailable si données non dispo."""
+
+    @property
+    def available(self) -> bool:
+        """Disponible uniquement si le compteur remonte des données journalières."""
+        return (
+            super().available
+            and bool(self._contract.get("consommations_journalieres"))
+        )
+
+
+class EauGrandLyonConso7JSensor(_EauGrandLyonDailyBase):
+    """Consommation sur les 7 derniers jours (compteur Téléo/TIC uniquement)."""
+
+    _attr_device_class = SensorDeviceClass.WATER
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "m³"
+    _attr_icon = "mdi:water-sync"
+    _attr_name = "Consommation 7 jours"
+    _attr_suggested_display_precision = 2
+    _attr_entity_registry_enabled_default = False  # désactivé par défaut
+
+    def __init__(self, coordinator, entry, contract_ref):
+        super().__init__(coordinator, entry, contract_ref)
+        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_conso_7j"
+
+    @property
+    def native_value(self) -> float | None:
+        return self._contract.get("consommation_7j")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        daily = self._contract.get("consommations_journalieres", [])
+        return {
+            "derniers_jours": [
+                {"date": e["date"], "consommation_m3": e["consommation_m3"]}
+                for e in daily[-7:]
+            ],
+        }
+
+
+class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
+    """Consommation sur les 30 derniers jours (compteur Téléo/TIC uniquement)."""
+
+    _attr_device_class = SensorDeviceClass.WATER
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "m³"
+    _attr_icon = "mdi:water-sync"
+    _attr_name = "Consommation 30 jours"
+    _attr_suggested_display_precision = 2
+    _attr_entity_registry_enabled_default = False  # désactivé par défaut
+
+    def __init__(self, coordinator, entry, contract_ref):
+        super().__init__(coordinator, entry, contract_ref)
+        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_conso_30j"
+
+    @property
+    def native_value(self) -> float | None:
+        return self._contract.get("consommation_30j")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        daily = self._contract.get("consommations_journalieres", [])
+        return {
+            "nb_jours_inclus": len(daily[-30:]),
+            "derniers_30j": [
+                {"date": e["date"], "consommation_m3": e["consommation_m3"]}
+                for e in daily[-30:]
+            ],
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Coûts estimés
+# ══════════════════════════════════════════════════════════════════════
+
+class EauGrandLyonCoutMoisSensor(_EauGrandLyonBase):
+    """Coût estimé du mois courant (€)."""
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_icon = "mdi:water-percent"
+    _attr_name = "Coût estimé mois courant"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator, entry, contract_ref):
+        super().__init__(coordinator, entry, contract_ref)
+        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_cout_mois"
+
+    @property
+    def native_value(self) -> float | None:
+        return self._contract.get("cout_mois_courant_eur")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        c = self._contract
+        return {
+            "période": c.get("label_mois_courant", ""),
+            "consommation_m3": c.get("consommation_mois_courant"),
+            "tarif_appliqué_eur_m3": c.get("tarif_m3"),
+            "note": "Estimation basée sur le tarif configuré. Consultez votre facture.",
+        }
+
+
+class EauGrandLyonCoutAnnuelSensor(_EauGrandLyonBase):
+    """Coût estimé des 12 derniers mois (€)."""
+
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    _attr_native_unit_of_measurement = "EUR"
+    _attr_icon = "mdi:currency-eur"
+    _attr_name = "Coût estimé annuel (12 mois)"
+    _attr_suggested_display_precision = 2
+
+    def __init__(self, coordinator, entry, contract_ref):
+        super().__init__(coordinator, entry, contract_ref)
+        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_cout_annuel"
+
+    @property
+    def native_value(self) -> float | None:
+        return self._contract.get("cout_annuel_eur")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        c = self._contract
+        return {
+            "consommation_annuelle_m3": c.get("consommation_annuelle"),
+            "tarif_appliqué_eur_m3": c.get("tarif_m3"),
+            "note": "Estimation — modifiez le tarif dans les options de l'intégration.",
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Solde du compte client
 # ══════════════════════════════════════════════════════════════════════
 
 class EauGrandLyonSoldeSensor(_EauGrandLyonBase):
-    """Solde du compte client en euros."""
+    """Solde du compte client (€)."""
 
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -273,12 +402,7 @@ class EauGrandLyonSoldeSensor(_EauGrandLyonBase):
     _attr_name = "Solde compte"
     _attr_suggested_display_precision = 2
 
-    def __init__(
-        self,
-        coordinator: EauGrandLyonCoordinator,
-        entry: ConfigEntry,
-        contract_ref: str,
-    ) -> None:
+    def __init__(self, coordinator, entry, contract_ref):
         super().__init__(coordinator, entry, contract_ref)
         self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_solde"
 
@@ -301,17 +425,12 @@ class EauGrandLyonSoldeSensor(_EauGrandLyonBase):
 # ══════════════════════════════════════════════════════════════════════
 
 class EauGrandLyonStatutSensor(_EauGrandLyonBase):
-    """Statut actuel du contrat (actif, résilié, etc.)."""
+    """Statut du contrat (actif, résilié, etc.)."""
 
     _attr_icon = "mdi:file-document-check"
     _attr_name = "Statut contrat"
 
-    def __init__(
-        self,
-        coordinator: EauGrandLyonCoordinator,
-        entry: ConfigEntry,
-        contract_ref: str,
-    ) -> None:
+    def __init__(self, coordinator, entry, contract_ref):
         super().__init__(coordinator, entry, contract_ref)
         self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_statut"
 
@@ -344,12 +463,7 @@ class EauGrandLyonDateEcheanceSensor(_EauGrandLyonBase):
     _attr_icon = "mdi:calendar-end"
     _attr_name = "Fin de contrat"
 
-    def __init__(
-        self,
-        coordinator: EauGrandLyonCoordinator,
-        entry: ConfigEntry,
-        contract_ref: str,
-    ) -> None:
+    def __init__(self, coordinator, entry, contract_ref):
         super().__init__(coordinator, entry, contract_ref)
         self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_date_echeance"
 
@@ -365,14 +479,11 @@ class EauGrandLyonDateEcheanceSensor(_EauGrandLyonBase):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        c = self._contract
-        return {
-            "date_début": c.get("date_effet"),
-        }
+        return {"date_début": self._contract.get("date_effet")}
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Alertes actives (sensor global)
+# Alertes actives (global)
 # ══════════════════════════════════════════════════════════════════════
 
 class EauGrandLyonAlertesSensor(CoordinatorEntity[EauGrandLyonCoordinator], SensorEntity):
@@ -384,18 +495,13 @@ class EauGrandLyonAlertesSensor(CoordinatorEntity[EauGrandLyonCoordinator], Sens
     _attr_name = "Alertes actives"
     _attr_native_unit_of_measurement = "alertes"
 
-    def __init__(
-        self,
-        coordinator: EauGrandLyonCoordinator,
-        entry: ConfigEntry,
-    ) -> None:
+    def __init__(self, coordinator, entry):
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_alertes"
 
     @property
     def device_info(self) -> DeviceInfo:
-        # Rattaché au premier contrat trouvé (ou device générique si aucun)
         contracts = (self.coordinator.data or {}).get("contracts", {})
         first_ref = next(iter(contracts), None)
         if first_ref:
@@ -405,7 +511,7 @@ class EauGrandLyonAlertesSensor(CoordinatorEntity[EauGrandLyonCoordinator], Sens
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name="Eau du Grand Lyon",
-            manufacturer="Morgeek",
+            manufacturer="Morgeek & Claude",
         )
 
     @property
@@ -413,3 +519,51 @@ class EauGrandLyonAlertesSensor(CoordinatorEntity[EauGrandLyonCoordinator], Sens
         if not self.coordinator.data:
             return 0
         return self.coordinator.data.get("nb_alertes", 0)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Dernière mise à jour réussie (global)
+# ══════════════════════════════════════════════════════════════════════
+
+class EauGrandLyonLastUpdateSensor(
+    CoordinatorEntity[EauGrandLyonCoordinator], SensorEntity
+):
+    """Horodatage de la dernière synchronisation réussie."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:clock-check-outline"
+    _attr_has_entity_name = True
+    _attr_name = "Dernière mise à jour"
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_last_update"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        contracts = (self.coordinator.data or {}).get("contracts", {})
+        first_ref = next(iter(contracts), None)
+        if first_ref:
+            return DeviceInfo(
+                identifiers={(DOMAIN, f"{self._entry.entry_id}_{first_ref}")},
+            )
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name="Eau du Grand Lyon",
+            manufacturer="Morgeek & Claude",
+        )
+
+    @property
+    def native_value(self) -> datetime | None:
+        if not self.coordinator.data:
+            return None
+        return self.coordinator.data.get("last_update_success_time")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data or {}
+        return {
+            "dernière_erreur": data.get("last_error"),
+            "type_erreur": data.get("last_error_type"),
+        }

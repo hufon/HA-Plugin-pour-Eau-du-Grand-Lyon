@@ -25,6 +25,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Rechargement automatique si les options changent (intervalle de mise à jour)
+    entry.async_on_unload(entry.add_update_listener(_async_update_options))
+
     return True
 
 
@@ -34,3 +37,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator: EauGrandLyonCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_close()
     return unload_ok
+
+
+async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Recharge l'intégration quand les options changent.
+
+    Appelé automatiquement par HA lorsque l'utilisateur modifie les options
+    (ex. intervalle de mise à jour). Le rechargement recrée le coordinateur
+    avec le nouvel intervalle.
+    """
+    _LOGGER.debug(
+        "Options modifiées pour %s, rechargement de l'intégration", entry.title
+    )
+    await hass.config_entries.async_reload(entry.entry_id)

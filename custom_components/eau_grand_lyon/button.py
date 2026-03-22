@@ -56,7 +56,7 @@ class EauGrandLyonRefreshButton(
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name="Eau du Grand Lyon",
-            manufacturer="Morgeek & Claude",
+            manufacturer="Morgeek",
         )
 
     async def async_press(self) -> None:

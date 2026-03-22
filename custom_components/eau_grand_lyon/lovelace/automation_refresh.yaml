@@ -1,0 +1,89 @@
+# ═══════════════════════════════════════════════════════════════════
+#  Automation : Rafraîchissement planifié quotidien
+#  Eau du Grand Lyon — v2.2.0
+#
+#  Installation :
+#  Option A (recommandée) — via l'UI HA :
+#    Paramètres → Automations → Créer → Coller le contenu YAML
+#    (mode "Modifier en YAML" en bas à droite)
+#
+#  Option B — dans configuration.yaml :
+#    automation: !include_dir_merge_list automations/
+#    (puis copier ce fichier dans config/automations/)
+#
+#  Cette automation remplace/complète le polling de l'intégration :
+#  elle déclenche la mise à jour exactement à 6h du matin, en dehors
+#  des heures où le WAF est le plus sollicité.
+# ═══════════════════════════════════════════════════════════════════
+
+alias: "Eau Grand Lyon — Rafraîchissement quotidien 6h"
+description: >
+  Déclenche la mise à jour des données Eau du Grand Lyon chaque matin
+  à 6h00. Complète (ou remplace) le polling automatique de l'intégration.
+  Fonctionne en pressant le bouton "Forcer la mise à jour".
+
+trigger:
+  - platform: time
+    at: "06:00:00"
+
+condition:
+  # Optionnel : ne déclenche que si HA est connecté à internet
+  - condition: state
+    entity_id: binary_sensor.internet_access   # adaptez si nécessaire
+    state: "on"
+
+action:
+  - service: button.press
+    target:
+      entity_id: button.eau_du_grand_lyon_forcer_la_mise_a_jour
+
+  # Notification optionnelle (commentez si indésirable)
+  - delay: "00:00:30"   # Attend 30s que les données soient récupérées
+  - service: notify.persistent_notification
+    data:
+      title: "💧 Eau du Grand Lyon mis à jour"
+      message: >
+        Données actualisées.
+        Consommation ce mois :
+        {{ states('sensor.eau_du_grand_lyon_consommation_mois_courant') }} m³
+        ({{ state_attr('sensor.eau_du_grand_lyon_consommation_mois_courant', 'période') }})
+      notification_id: eau_grand_lyon_daily_refresh
+
+mode: single
+
+---
+# ═══════════════════════════════════════════════════════════════════
+#  Automation bonus : Alerte dépassement de consommation
+#  Déclenche une notification si la conso mensuelle dépasse un seuil
+# ═══════════════════════════════════════════════════════════════════
+
+alias: "Eau Grand Lyon — Alerte dépassement consommation"
+description: >
+  Envoie une notification si la consommation du mois courant dépasse
+  le seuil défini. Utile pour détecter une fuite ou une surconsommation.
+
+trigger:
+  - platform: numeric_state
+    entity_id: sensor.eau_du_grand_lyon_consommation_mois_courant
+    above: 20   # ← Seuil en m³ : adaptez à votre consommation habituelle
+
+condition: []
+
+action:
+  - service: notify.mobile_app   # Adaptez au service de notification HA
+    data:
+      title: "⚠️ Surconsommation d'eau détectée"
+      message: >
+        La consommation de {{ state_attr('sensor.eau_du_grand_lyon_consommation_mois_courant', 'période') }}
+        atteint {{ states('sensor.eau_du_grand_lyon_consommation_mois_courant') }} m³.
+        Cela représente environ
+        {{ states('sensor.eau_du_grand_lyon_cout_estime_mois_courant') }} €.
+        Vérifiez qu'il n'y a pas de fuite.
+      data:
+        url: "https://agence.eaudugrandlyon.com"
+        actions:
+          - action: URI
+            title: Consulter l'espace client
+            uri: "https://agence.eaudugrandlyon.com"
+
+mode: single
