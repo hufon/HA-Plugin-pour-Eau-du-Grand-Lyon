@@ -117,6 +117,8 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
         self._prev_nb_alertes: int = 0
         self._last_request_mono: float | None = None
         self._min_request_delay_s: float = 30.0  # Rate limiting: 30s min entre requêtes
+        # Délai au premier démarrage pour éviter le blocage WAF juste après le config_flow
+        self._startup_delay_done: bool = False
         # Dernières données valides connues (utilisées en mode hors-ligne)
         self._last_good_data: dict | None = None
         # Cache persistant pour l'historique
@@ -174,6 +176,16 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
 
     async def _async_update_data(self) -> dict:
         """Récupère toutes les données depuis l'API avec retry intelligent."""
+        # Délai au premier démarrage : le config_flow vient de s'authentifier — on attend
+        # pour éviter un blocage WAF (double auth depuis la même IP en quelques secondes).
+        if not self._startup_delay_done:
+            self._startup_delay_done = True
+            _LOGGER.debug(
+                "Premier démarrage du coordinateur — attente 45 s pour éviter le blocage WAF "
+                "après l'authentification du config_flow"
+            )
+            await asyncio.sleep(45)
+
         # Rate limiting: éviter les requêtes trop fréquentes (utilise time.monotonic pour éviter
         # les problèmes de changement d'heure système / NTP)
         mono_now = time.monotonic()
@@ -205,6 +217,16 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
             except WafBlockedError as err:
                 last_exc = err
                 last_err_type = "WafBlockedError"
+                # Sans cache (premier démarrage), on échoue rapidement pour laisser le
+                # mécanisme de retry de HA (ConfigEntryNotReady) gérer les tentatives ultérieures
+                # avec un délai suffisant pour que le WAF se débloque.
+                if self._last_good_data is None:
+                    _LOGGER.warning(
+                        "WAF bloqué au premier démarrage (tentative %d/3) — "
+                        "échec rapide pour retry HA — %s",
+                        attempt + 1, err,
+                    )
+                    break
                 if attempt < len(_WAF_RETRY_DELAYS):
                     delay = _WAF_RETRY_DELAYS[attempt]
                     _LOGGER.warning(

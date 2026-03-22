@@ -148,6 +148,8 @@ class EauGrandLyonApi:
         _LOGGER.debug("Login OK (status=%s), récupération du code PKCE...", login_status)
 
         # Étape 2 : code d'autorisation
+        # On suit les redirections (allow_redirects=True) et on extrait le code
+        # depuis l'URL finale (autorisation-callback.html?code=...).
         code_challenge = _compute_code_challenge(CODE_VERIFIER)
         params = {
             "redirect_uri": REDIRECT_URI,
@@ -168,6 +170,7 @@ class EauGrandLyonApi:
                         "Le WAF a bloqué la requête authorize-internet (HTTP 403)."
                     )
                 final_url = str(resp.url)
+                _LOGGER.debug("Authorize final URL: %s", final_url[:200])
         except WafBlockedError:
             raise
         except aiohttp.ClientError as err:
