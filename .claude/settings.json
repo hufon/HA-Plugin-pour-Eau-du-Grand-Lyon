@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git rm:*)",
+      "Bash(ls custom_components/eau_grand_lyon/*.py)"
+    ]
+  }
+}

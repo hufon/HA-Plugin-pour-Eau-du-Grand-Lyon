@@ -26,11 +26,11 @@ trigger:
   - platform: time
     at: "06:00:00"
 
-condition:
-  # Optionnel : ne déclenche que si HA est connecté à internet
-  - condition: state
-    entity_id: binary_sensor.internet_access   # adaptez si nécessaire
-    state: "on"
+condition: []
+  # Optionnel : décommentez si vous avez un binary_sensor.internet_access dans HA :
+  # - condition: state
+  #   entity_id: binary_sensor.internet_access
+  #   state: "on"
 
 action:
   - service: button.press

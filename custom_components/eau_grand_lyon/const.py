@@ -14,5 +14,3 @@ CONF_TARIF_M3 = "tarif_m3"
 # Source : https://agence.eaudugrandlyon.com — à vérifier sur votre facture
 DEFAULT_TARIF_M3 = 5.20
 
-# Intervalle de mise à jour par défaut (données mensuelles, évite les blocages WAF)
-UPDATE_INTERVAL_HOURS = DEFAULT_UPDATE_INTERVAL_HOURS

@@ -5,7 +5,6 @@ import logging
 from datetime import date, datetime
 from typing import Any
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -54,7 +53,6 @@ async def async_setup_entry(
         entities.append(EauGrandLyonCoutAnnuelSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonCoutCumuleSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonEconomieSensor(coordinator, entry, ref))
-        entities.append(EauGrandLyonLeakAlertSensor(coordinator, entry, ref))
         # ── Compte & contrat ──────────────────────────────────────────
         entities.append(EauGrandLyonSoldeSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonStatutSensor(coordinator, entry, ref))
@@ -438,7 +436,7 @@ class EauGrandLyonEconomieSensor(_EauGrandLyonBase):
 
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "€"
+    _attr_native_unit_of_measurement = "EUR"
     _attr_icon = "mdi:trending-down"
     _attr_name = "Économie vs N-1"
 
@@ -464,40 +462,6 @@ class EauGrandLyonEconomieSensor(_EauGrandLyonBase):
             "consommation_n1_m3": c.get("consommation_n1"),
             "consommation_actuelle_m3": c.get("consommation_annuelle"),
             "tarif_eur_m3": c.get("tarif_m3"),
-        }
-
-
-# ══════════════════════════════════════════════════════════════════════
-# Alerte fuite (détection surconsommation anormale)
-# ══════════════════════════════════════════════════════════════════════
-
-class EauGrandLyonLeakAlertSensor(_EauGrandLyonBase, BinarySensorEntity):
-    """Alerte possible fuite basée sur surconsommation mensuelle."""
-
-    _attr_device_class = "problem"
-    _attr_name = "Alerte fuite possible"
-
-    def __init__(self, coordinator, entry, contract_ref):
-        super().__init__(coordinator, entry, contract_ref)
-        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_leak_alert"
-
-    @property
-    def is_on(self) -> bool:
-        c = self._contract
-        conso_courant = c.get("consommation_mois_courant")
-        conso_precedent = c.get("consommation_mois_precedent")
-        if conso_courant and conso_precedent:
-            # Alerte si conso actuelle > 2x la précédente (seuil simple)
-            return conso_courant > 2 * conso_precedent
-        return False
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        c = self._contract
-        return {
-            "consommation_courant_m3": c.get("consommation_mois_courant"),
-            "consommation_precedent_m3": c.get("consommation_mois_precedent"),
-            "seuil_alerte": "Consommation actuelle > 2x précédente",
         }
 
 
@@ -616,8 +580,10 @@ class EauGrandLyonEnergyWaterSensor(_EauGrandLyonBase):
 
     @property
     def native_value(self) -> float | None:
-        # Utilise la consommation annuelle comme valeur totale croissante
-        return self._contract.get("consommation_annuelle")
+        consos = self._contract.get("consommations", [])
+        if not consos:
+            return None
+        return round(sum(e["consommation_m3"] for e in consos), 1)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -647,8 +613,11 @@ class EauGrandLyonEnergyCostSensor(_EauGrandLyonBase):
 
     @property
     def native_value(self) -> float | None:
-        # Utilise le coût annuel comme valeur totale croissante
-        return self._contract.get("cout_annuel_eur")
+        consos = self._contract.get("consommations", [])
+        tarif = self._contract.get("tarif_m3", 0)
+        if not consos or not tarif:
+            return None
+        return round(sum(e["consommation_m3"] for e in consos) * tarif, 2)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
