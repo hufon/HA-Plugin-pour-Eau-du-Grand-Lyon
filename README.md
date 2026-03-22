@@ -69,12 +69,12 @@ Pour activer les notifications :
 
 ## Installation
 
-### Option 1 : Installation Manuelle
+### Option 1 : Installation a l'ancienne
 1. Téléchargez la dernière version depuis le [dépôt GitHub](https://github.com/morgeek/HA-Plugin-pour-Eau-du-Grand-Lyon).
 2. Extrayez le contenu du dossier `custom_components/eau_grand_lyon/` dans le répertoire `custom_components/` de votre Home Assistant.
 3. Redémarrez Home Assistant.
 
-### Option 2 : HACS dispo
+### Option 2 : HACS (normalement ça marche)
 1. Assurez-vous d'avoir [HACS](https://hacs.xyz/) installé dans votre instance Home Assistant.
 2. Allez dans "Intégrations" et recherchez "Eau du Grand Lyon".
 3. Cliquez sur "Installer" et redémarrez Home Assistant.
@@ -86,7 +86,9 @@ Pour activer les notifications :
 3. Saisissez votre email et mot de passe du compte Eau du Grand Lyon.
 4. Terminez la configuration.
 
-L'intégration récupérera automatiquement les données toutes les 6 heures (car les données eau sont généralement mensuelles).
+L'intégration récupérera automatiquement les données toutes les 6 heures (car les données eau sont généralement mensuelles). Et on ne va pas tabasser leur serveur inutilement.
+
+![alt text](https://github.com/morgeek/HA-Plugin-pour-Eau-du-Grand-Lyon/blob/main/custom_components/eau_grand_lyon/HA-Eau-Grand-Lyon2.png)
 
 ## Utilisation
 Une fois configuré, les capteurs apparaîtront dans votre tableau de bord Home Assistant. Vous pouvez les utiliser dans des automatisations, des tableaux de bord, ou de toute autre manière que vous utilisez les capteurs dans Home Assistant.
