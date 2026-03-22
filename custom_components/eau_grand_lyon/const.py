@@ -5,5 +5,5 @@ DOMAIN = "eau_grand_lyon"
 CONF_EMAIL = "email"
 CONF_PASSWORD = "password"
 
-# Intervalle de mise à jour (les données sont mensuelles, inutile de trop souvent)
-UPDATE_INTERVAL_HOURS = 6
+# Intervalle de mise à jour : 1x par jour (données mensuelles, évite les blocages WAF)
+UPDATE_INTERVAL_HOURS = 24

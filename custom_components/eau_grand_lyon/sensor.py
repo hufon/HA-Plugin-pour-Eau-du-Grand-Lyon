@@ -81,16 +81,20 @@ class _EauGrandLyonBase(CoordinatorEntity[EauGrandLyonCoordinator], SensorEntity
 
     @property
     def device_info(self) -> DeviceInfo:
-        ref = self._contract.get("reference", self._contract_ref)
         calibre = self._contract.get("calibre_compteur", "")
         usage = self._contract.get("usage", "")
         model_parts = [p for p in [calibre and f"DN{calibre}", usage] if p]
+        # Numéro de compteur (référence PDS physique, ex. "71233HC1")
+        numero_compteur = (
+            self._contract.get("reference_pds")
+            or self._contract.get("reference", self._contract_ref)
+        )
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry.entry_id}_{self._contract_ref}")},
             name="Eau du Grand Lyon",
             manufacturer="Morgeek & Claude",
             model=", ".join(model_parts) or "Compteur eau",
-            serial_number=ref,
+            serial_number=numero_compteur,
             configuration_url="https://agence.eaudugrandlyon.com",
         )
 
