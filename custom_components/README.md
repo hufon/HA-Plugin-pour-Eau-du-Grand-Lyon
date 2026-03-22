@@ -4,6 +4,8 @@
 
 Ceci est une intégration personnalisée NON OFFICIELLE pour [Home Assistant](https://www.home-assistant.io/) qui fournit des capteurs pour les données de consommation d'eau du service Eau du Grand Lyon.
 
+![alt text](https://github.com/morgeek/HA-Plugin-pour-Eau-du-Grand-Lyon/blob/main/custom_components/eau_grand_lyon/HA-Eau-Grand-Lyon.png)
+
 ## Fonctionnalités
 Cette intégration vous permet de surveiller votre utilisation de l'eau et les informations de compte du service des eaux de Grand Lyon. Elle fournit les capteurs suivants :
 
