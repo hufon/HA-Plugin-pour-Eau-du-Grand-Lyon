@@ -24,10 +24,10 @@ Cette intégration vous permet de surveiller votre utilisation de l'eau et les i
 
 ## Installation
 
-### Option 1 : HACS (Recommandé)
+### Option 1 : HACS dispo dans prochaine version
 
 1. Assurez-vous d'avoir [HACS](https://hacs.xyz/) installé dans votre instance Home Assistant.
-2. Dans HACS, allez dans "Intégrations" et recherchez "Eau du Grand Lyon".
+2. Allez dans "Intégrations" et recherchez "Eau du Grand Lyon".
 3. Cliquez sur "Installer" et redémarrez Home Assistant.
 4. Passez à la configuration ci-dessous.
 
