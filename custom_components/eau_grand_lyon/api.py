@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
@@ -342,16 +343,18 @@ class EauGrandLyonApi:
         Format attendu de chaque entrée :
             {"date": "YYYY-MM-DD", "consommation": <float>, ...}
         """
+        now_local = datetime.now().astimezone()
+        date_fin_dt = now_local.replace(hour=23, minute=59, second=59, microsecond=999000).astimezone(timezone.utc)
+        date_debut_dt = date_fin_dt - timedelta(days=nb_jours)
+        dateFin = date_fin_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        dateDebut = date_debut_dt.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
         # Deux patterns d'endpoint observés selon les versions de l'API
         endpoints = [
             (
-                f"/application/rest/interfaces/ael/contrats/{contract_id}"
-                f"/consommationsJournalieres?nbJours={nb_jours}"
-            ),
-            (
-                f"/application/rest/interfaces/ael/contrats/{contract_id}"
-                f"/consommationsDailyPeriode?nbJours={nb_jours}"
-            ),
+                f"/application/rest/produits/contrats/{contract_id}"
+                f"/consommationsJournalieres?dateDebut={dateDebut}&dateFin={dateFin}"
+            )
         ]
 
         for endpoint in endpoints:
