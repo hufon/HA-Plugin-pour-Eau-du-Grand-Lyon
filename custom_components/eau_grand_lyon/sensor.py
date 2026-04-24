@@ -48,6 +48,7 @@ async def async_setup_entry(
         # ── Consommations journalières (si compteur compatible) ───────
         entities.append(EauGrandLyonConso7JSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonConso30JSensor(coordinator, entry, ref))
+        entities.append(EauGrandLyonIndexJournalierSensor(coordinator, entry, ref))
         # ── Coûts estimés ─────────────────────────────────────────────
         entities.append(EauGrandLyonCoutMoisSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonCoutAnnuelSensor(coordinator, entry, ref))
@@ -345,6 +346,39 @@ class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
                 }
                 for e in daily[-30:]
             ],
+        }
+
+
+class EauGrandLyonIndexJournalierSensor(_EauGrandLyonDailyBase):
+    """Dernier index disponible issu des données journalières."""
+
+    _attr_device_class = SensorDeviceClass.WATER
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_native_unit_of_measurement = "m³"
+    _attr_icon = "mdi:counter"
+    _attr_name = "Index journalier (dernier)"
+    _attr_suggested_display_precision = 3
+    _attr_entity_registry_enabled_default = False  # désactivé par défaut
+
+    def __init__(self, coordinator, entry, contract_ref):
+        super().__init__(coordinator, entry, contract_ref)
+        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_index_journalier_dernier"
+
+    @property
+    def available(self) -> bool:
+        return super().available and self._contract.get("index_journalier_dernier") is not None
+
+    @property
+    def native_value(self) -> float | None:
+        return self._contract.get("index_journalier_dernier")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "date_releve": self._contract.get("index_journalier_dernier_date"),
+            "index_brut": self._contract.get("index_journalier_dernier_brut"),
+            "index_unite_brute": self._contract.get("index_journalier_dernier_unite"),
+            "index_conversion_source": self._contract.get("index_journalier_dernier_source"),
         }
 
 

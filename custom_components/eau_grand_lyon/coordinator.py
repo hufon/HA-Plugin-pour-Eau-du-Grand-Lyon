@@ -331,11 +331,28 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
 
             conso_7j: float | None = None
             conso_30j: float | None = None
+            index_journalier_dernier: float | None = None
+            index_journalier_dernier_date: str | None = None
+            index_journalier_dernier_brut: float | None = None
+            index_journalier_dernier_unite: str | None = None
+            index_journalier_dernier_source: str | None = None
             if consos_journalieres:
                 recent_7 = consos_journalieres[-7:]
                 recent_30 = consos_journalieres[-30:]
                 conso_7j = round(sum(e["consommation_m3"] for e in recent_7), 2)
                 conso_30j = round(sum(e["consommation_m3"] for e in recent_30), 2)
+
+                # Dernier index disponible dans l'historique journalier
+                for entry in reversed(consos_journalieres):
+                    idx = entry.get("index_m3")
+                    if idx is None:
+                        continue
+                    index_journalier_dernier = round(float(idx), 3)
+                    index_journalier_dernier_date = entry.get("date")
+                    index_journalier_dernier_brut = entry.get("index_brut")
+                    index_journalier_dernier_unite = entry.get("index_unite_brute")
+                    index_journalier_dernier_source = entry.get("index_conversion_source")
+                    break
 
             # ── Coûts estimés ────────────────────────────────────────
             cout_mois = (
@@ -360,6 +377,11 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
                 "consommations_journalieres": consos_journalieres,
                 "consommation_7j": conso_7j,
                 "consommation_30j": conso_30j,
+                "index_journalier_dernier": index_journalier_dernier,
+                "index_journalier_dernier_date": index_journalier_dernier_date,
+                "index_journalier_dernier_brut": index_journalier_dernier_brut,
+                "index_journalier_dernier_unite": index_journalier_dernier_unite,
+                "index_journalier_dernier_source": index_journalier_dernier_source,
                 "cout_mois_courant_eur": cout_mois,
                 "cout_annuel_eur": cout_annuel,
                 "tarif_m3": tarif_m3,

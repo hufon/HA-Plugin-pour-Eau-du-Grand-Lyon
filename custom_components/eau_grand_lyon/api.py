@@ -512,6 +512,23 @@ class EauGrandLyonApi:
 
             return ""
 
+        def _extract_index_value(entry: dict[str, Any]) -> Any:
+            """Retourne la valeur d'index brute si présente, sinon None."""
+            for key in (
+                "index",
+                "indexCompteur",
+                "index_compteur",
+                "releve",
+                "releveCompteur",
+                "volumeCompteur",
+                "volume_cumule",
+                "consommationCumulee",
+                "consommation_cumulee",
+            ):
+                if key in entry and entry.get(key) is not None:
+                    return entry.get(key)
+            return None
+
         result = []
         for e in raw_entries:
             try:
@@ -524,12 +541,32 @@ class EauGrandLyonApi:
                     or e.get("uniteConsommation")
                 )
                 conso_m3, conversion_source = _to_m3(conso, unit)
+
+                raw_index = _extract_index_value(e)
+                index_unit = _normalize_unit(
+                    e.get("uniteIndex")
+                    or e.get("unite_index")
+                    or e.get("uniteReleve")
+                    or e.get("unite_releve")
+                    or e.get("unite")
+                    or e.get("unité")
+                    or e.get("unit")
+                )
+                index_m3: float | None = None
+                index_conversion_source: str | None = None
+                if raw_index is not None:
+                    index_m3, index_conversion_source = _to_m3(raw_index, index_unit)
+
                 result.append({
                     "date": date_str,
                     "consommation_m3": conso_m3,
                     "consommation_brute": float(conso),
                     "unite_brute": unit or None,
                     "conversion_source": conversion_source,
+                    "index_m3": index_m3,
+                    "index_brut": float(raw_index) if raw_index is not None else None,
+                    "index_unite_brute": index_unit or None,
+                    "index_conversion_source": index_conversion_source,
                 })
             except (ValueError, TypeError):
                 _LOGGER.debug("Entrée journalière ignorée (format inattendu) : %s", e)
