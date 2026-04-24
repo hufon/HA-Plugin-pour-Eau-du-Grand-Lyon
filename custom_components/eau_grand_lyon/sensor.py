@@ -299,7 +299,13 @@ class EauGrandLyonConso7JSensor(_EauGrandLyonDailyBase):
         daily = self._contract.get("consommations_journalieres", [])
         return {
             "derniers_jours": [
-                {"date": e["date"], "consommation_m3": e["consommation_m3"]}
+                {
+                    "date": e["date"],
+                    "consommation_m3": e["consommation_m3"],
+                    "consommation_brute": e.get("consommation_brute"),
+                    "unite_brute": e.get("unite_brute"),
+                    "conversion_source": e.get("conversion_source"),
+                }
                 for e in daily[-7:]
             ],
         }
@@ -330,7 +336,13 @@ class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
         return {
             "nb_jours_inclus": len(daily[-30:]),
             "derniers_30j": [
-                {"date": e["date"], "consommation_m3": e["consommation_m3"]}
+                {
+                    "date": e["date"],
+                    "consommation_m3": e["consommation_m3"],
+                    "consommation_brute": e.get("consommation_brute"),
+                    "unite_brute": e.get("unite_brute"),
+                    "conversion_source": e.get("conversion_source"),
+                }
                 for e in daily[-30:]
             ],
         }

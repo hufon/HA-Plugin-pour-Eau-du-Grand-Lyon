@@ -450,14 +450,60 @@ class EauGrandLyonApi:
     @staticmethod
     def format_daily_consumptions(raw_entries: list[dict]) -> list[dict]:
         """Enrichit les entrées journalières brutes (si disponibles)."""
+        liter_units = {
+            "l",
+            "litre",
+            "litres",
+            "liter",
+            "liters",
+            "dm3",
+            "dm^3",
+        }
+        m3_units = {
+            "m3",
+            "m^3",
+            "m³",
+            "metre_cube",
+            "metres_cubes",
+            "meter_cube",
+            "cubic_meter",
+            "cubic_meters",
+        }
+
+        def _normalize_unit(raw_unit: Any) -> str:
+            if raw_unit is None:
+                return ""
+            return str(raw_unit).strip().lower().replace(" ", "")
+
+        def _to_m3(raw_value: Any, unit: str) -> tuple[float, str]:
+            value = float(raw_value)
+            if unit in liter_units:
+                return value / 1000.0, "L"
+            if unit in m3_units:
+                return value, "m3"
+            # Fallback prudent: des valeurs journalières >100 sont très probablement en litres.
+            if value > 100:
+                return value / 1000.0, "auto(L)"
+            return value, "assumed(m3)"
+
         result = []
         for e in raw_entries:
             try:
                 date_str = e.get("date", "")
                 conso = e.get("consommation", 0)
+                unit = _normalize_unit(
+                    e.get("unite")
+                    or e.get("unité")
+                    or e.get("unit")
+                    or e.get("uniteConsommation")
+                )
+                conso_m3, conversion_source = _to_m3(conso, unit)
                 result.append({
                     "date": date_str,
-                    "consommation_m3": float(conso),
+                    "consommation_m3": conso_m3,
+                    "consommation_brute": float(conso),
+                    "unite_brute": unit or None,
+                    "conversion_source": conversion_source,
                 })
             except (ValueError, TypeError):
                 _LOGGER.debug("Entrée journalière ignorée (format inattendu) : %s", e)
