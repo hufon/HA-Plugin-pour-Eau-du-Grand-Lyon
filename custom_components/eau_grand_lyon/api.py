@@ -486,10 +486,36 @@ class EauGrandLyonApi:
                 return value / 1000.0, "auto(L)"
             return value, "assumed(m3)"
 
+        def _extract_date(entry: dict[str, Any]) -> str:
+            """Retourne une date ISO YYYY-MM-DD si possible, sinon chaîne vide."""
+            for key in ("date", "jour", "dateReleve", "dateRelève", "horodatage", "timestamp"):
+                raw = entry.get(key)
+                if not raw:
+                    continue
+                raw_str = str(raw)
+                # Cas ISO complet: 2026-04-24T00:00:00Z
+                if len(raw_str) >= 10 and raw_str[4] == "-" and raw_str[7] == "-":
+                    return raw_str[:10]
+                # Cas compact: 20260424
+                if len(raw_str) == 8 and raw_str.isdigit():
+                    return f"{raw_str[0:4]}-{raw_str[4:6]}-{raw_str[6:8]}"
+
+            # Cas éclaté: annee/mois/jour
+            try:
+                annee = int(entry.get("annee"))
+                mois = int(entry.get("mois"))
+                jour = int(entry.get("jourDuMois") or entry.get("jour"))
+                if 1 <= mois <= 12 and 1 <= jour <= 31:
+                    return f"{annee:04d}-{mois:02d}-{jour:02d}"
+            except (TypeError, ValueError):
+                pass
+
+            return ""
+
         result = []
         for e in raw_entries:
             try:
-                date_str = e.get("date", "")
+                date_str = _extract_date(e)
                 conso = e.get("consommation", 0)
                 unit = _normalize_unit(
                     e.get("unite")
