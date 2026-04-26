@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import json
 import logging
@@ -450,6 +450,24 @@ class EauGrandLyonApi:
     @staticmethod
     def format_daily_consumptions(raw_entries: list[dict]) -> list[dict]:
         """Enrichit les entrées journalières brutes (si disponibles)."""
+        month_names_fr = {
+            "janvier": 1,
+            "fevrier": 2,
+            "février": 2,
+            "mars": 3,
+            "avril": 4,
+            "mai": 5,
+            "juin": 6,
+            "juillet": 7,
+            "aout": 8,
+            "août": 8,
+            "septembre": 9,
+            "octobre": 10,
+            "novembre": 11,
+            "decembre": 12,
+            "décembre": 12,
+        }
+
         liter_units = {
             "l",
             "litre",
@@ -475,40 +493,161 @@ class EauGrandLyonApi:
                 return ""
             return str(raw_unit).strip().lower().replace(" ", "")
 
-        def _to_m3(raw_value: Any, unit: str) -> tuple[float, str]:
+        def _to_m3(raw_value: Any, unit: str, inferred_unit: str = "") -> tuple[float, str]:
             value = float(raw_value)
             if unit in liter_units:
                 return value / 1000.0, "L"
             if unit in m3_units:
                 return value, "m3"
+            if inferred_unit == "l":
+                return value / 1000.0, "inferred(L)"
+            if inferred_unit == "m3":
+                return value, "inferred(m3)"
             # Fallback prudent: des valeurs journalières >100 sont très probablement en litres.
             if value > 100:
                 return value / 1000.0, "auto(L)"
             return value, "assumed(m3)"
 
+        def _candidate_date_from_parts(entry: dict[str, Any], month_mode: str) -> date | None:
+            """Construit une date depuis annee/mois/jour selon un mode de mois donné."""
+            try:
+                annee = int(entry.get("annee"))
+                jour = int(entry.get("jourDuMois") or entry.get("jour"))
+            except (TypeError, ValueError):
+                return None
+
+            raw_month_value = entry.get("mois")
+            if raw_month_value is None:
+                return None
+
+            # Mois texte (janvier, février...) : non ambigu.
+            if isinstance(raw_month_value, str) and not raw_month_value.strip().isdigit():
+                raw_month = raw_month_value.strip().lower()
+                month_num = month_names_fr.get(raw_month)
+                if month_num is None:
+                    return None
+            else:
+                try:
+                    raw_num = int(raw_month_value)
+                except (TypeError, ValueError):
+                    return None
+
+                if month_mode == "zero_based":
+                    if not (0 <= raw_num <= 11):
+                        return None
+                    month_num = raw_num + 1
+                else:
+                    if not (1 <= raw_num <= 12):
+                        return None
+                    month_num = raw_num
+
+            try:
+                return date(annee, month_num, jour)
+            except ValueError:
+                return None
+
         def _extract_date(entry: dict[str, Any]) -> str:
             """Retourne une date ISO YYYY-MM-DD si possible, sinon chaîne vide."""
-            for key in ("date", "jour", "dateReleve", "dateRelève", "horodatage", "timestamp"):
+            def _parse_month(value: Any) -> int:
+                if value is None:
+                    raise ValueError("mois absent")
+                if isinstance(value, (int, float)):
+                    month_num = int(value)
+                    if 1 <= month_num <= 12:
+                        return month_num
+                    if 0 <= month_num <= 11:
+                        return month_num + 1
+                    raise ValueError("mois numérique hors plage")
+
+                raw_month = str(value).strip().lower()
+                if raw_month.isdigit():
+                    month_num = int(raw_month)
+                    if 1 <= month_num <= 12:
+                        return month_num
+                    if 0 <= month_num <= 11:
+                        return month_num + 1
+                if raw_month in month_names_fr:
+                    return month_names_fr[raw_month]
+                raise ValueError("mois non reconnu")
+
+            for key in (
+                "date",
+                "dateReleve",
+                "dateRelève",
+                "horodatage",
+                "timestamp",
+                "instant",
+            ):
                 raw = entry.get(key)
                 if not raw:
                     continue
-                raw_str = str(raw)
+
+                # Timestamp numérique (s ou ms)
+                if isinstance(raw, (int, float)):
+                    try:
+                        raw_num = int(raw)
+                        if raw_num > 10_000_000_000:
+                            dt = datetime.fromtimestamp(raw_num / 1000, tz=timezone.utc)
+                        else:
+                            dt = datetime.fromtimestamp(raw_num, tz=timezone.utc)
+                        return dt.date().isoformat()
+                    except (OverflowError, OSError, ValueError):
+                        pass
+
+                raw_str = str(raw).strip()
+                if not raw_str:
+                    continue
+
                 # Cas ISO complet: 2026-04-24T00:00:00Z
                 if len(raw_str) >= 10 and raw_str[4] == "-" and raw_str[7] == "-":
-                    return raw_str[:10]
+                    candidate = raw_str[:10]
+                    try:
+                        return datetime.strptime(candidate, "%Y-%m-%d").date().isoformat()
+                    except ValueError:
+                        pass
                 # Cas compact: 20260424
                 if len(raw_str) == 8 and raw_str.isdigit():
-                    return f"{raw_str[0:4]}-{raw_str[4:6]}-{raw_str[6:8]}"
+                    candidate = f"{raw_str[0:4]}-{raw_str[4:6]}-{raw_str[6:8]}"
+                    try:
+                        return datetime.strptime(candidate, "%Y-%m-%d").date().isoformat()
+                    except ValueError:
+                        pass
+
+                # Timestamp string (s ou ms)
+                if raw_str.isdigit() and len(raw_str) in (10, 13):
+                    try:
+                        raw_num = int(raw_str)
+                        if len(raw_str) == 13:
+                            dt = datetime.fromtimestamp(raw_num / 1000, tz=timezone.utc)
+                        else:
+                            dt = datetime.fromtimestamp(raw_num, tz=timezone.utc)
+                        return dt.date().isoformat()
+                    except (OverflowError, OSError, ValueError):
+                        pass
+
+                # Formats date texte fréquents
+                for fmt in (
+                    "%Y-%m-%d",
+                    "%Y/%m/%d",
+                    "%d/%m/%Y",
+                    "%d-%m-%Y",
+                    "%d.%m.%Y",
+                ):
+                    try:
+                        return datetime.strptime(raw_str, fmt).date().isoformat()
+                    except ValueError:
+                        continue
+
+                # ISO strict avec timezone (ex: ...Z)
+                try:
+                    return datetime.fromisoformat(raw_str.replace("Z", "+00:00")).date().isoformat()
+                except ValueError:
+                    pass
 
             # Cas éclaté: annee/mois/jour
-            try:
-                annee = int(entry.get("annee"))
-                mois = int(entry.get("mois"))
-                jour = int(entry.get("jourDuMois") or entry.get("jour"))
-                if 1 <= mois <= 12 and 1 <= jour <= 31:
-                    return f"{annee:04d}-{mois:02d}-{jour:02d}"
-            except (TypeError, ValueError):
-                pass
+            parsed_date = _candidate_date_from_parts(entry, inferred_month_mode)
+            if parsed_date is not None:
+                return parsed_date.isoformat()
 
             return ""
 
@@ -529,6 +668,78 @@ class EauGrandLyonApi:
                     return entry.get(key)
             return None
 
+        # Détermine l'encodage du mois pour les payloads journaliers éclatés.
+        numeric_month_values: list[int] = []
+        for entry in raw_entries:
+            raw_month = entry.get("mois")
+            if raw_month is None:
+                continue
+            try:
+                numeric_month_values.append(int(raw_month))
+            except (TypeError, ValueError):
+                continue
+
+        inferred_month_mode = "one_based"
+        if any(m == 0 for m in numeric_month_values):
+            inferred_month_mode = "zero_based"
+        elif any(m == 12 for m in numeric_month_values):
+            inferred_month_mode = "one_based"
+        elif numeric_month_values:
+            today = datetime.now(timezone.utc).date()
+
+            def _max_date_for_mode(mode: str) -> date | None:
+                candidates = [
+                    d for d in (_candidate_date_from_parts(entry, mode) for entry in raw_entries)
+                    if d is not None
+                ]
+                return max(candidates) if candidates else None
+
+            max_zero = _max_date_for_mode("zero_based")
+            max_one = _max_date_for_mode("one_based")
+
+            def _score(candidate: date | None) -> float:
+                if candidate is None:
+                    return float("inf")
+                # On écarte les dates très futures, puis on choisit celle la plus proche d'aujourd'hui.
+                if (candidate - today).days > 1:
+                    return float("inf")
+                return abs((today - candidate).days)
+
+            inferred_month_mode = "zero_based" if _score(max_zero) < _score(max_one) else "one_based"
+
+        # Détermine une unité implicite pour les entrées sans unité explicite.
+        explicit_liters = 0
+        explicit_m3 = 0
+        unknown_values: list[float] = []
+        for entry in raw_entries:
+            unit = _normalize_unit(
+                entry.get("unite")
+                or entry.get("unité")
+                or entry.get("unit")
+                or entry.get("uniteConsommation")
+            )
+            if unit in liter_units:
+                explicit_liters += 1
+            elif unit in m3_units:
+                explicit_m3 += 1
+            else:
+                try:
+                    unknown_values.append(abs(float(entry.get("consommation", 0))))
+                except (TypeError, ValueError):
+                    continue
+
+        inferred_unknown_unit = ""
+        if explicit_liters > explicit_m3 and explicit_liters > 0:
+            inferred_unknown_unit = "l"
+        elif explicit_m3 > explicit_liters and explicit_m3 > 0:
+            inferred_unknown_unit = "m3"
+        elif unknown_values:
+            # Si la majorité des valeurs inconnues ressemble à des litres (ex: 120..1200),
+            # on applique litres à tout le lot pour éviter les faux 23 m³.
+            liter_like_ratio = sum(1 for v in unknown_values if 10 <= v <= 5000) / len(unknown_values)
+            if liter_like_ratio >= 0.7:
+                inferred_unknown_unit = "l"
+
         result = []
         for e in raw_entries:
             try:
@@ -540,7 +751,7 @@ class EauGrandLyonApi:
                     or e.get("unit")
                     or e.get("uniteConsommation")
                 )
-                conso_m3, conversion_source = _to_m3(conso, unit)
+                conso_m3, conversion_source = _to_m3(conso, unit, inferred_unknown_unit)
 
                 raw_index = _extract_index_value(e)
                 index_unit = _normalize_unit(
@@ -555,7 +766,7 @@ class EauGrandLyonApi:
                 index_m3: float | None = None
                 index_conversion_source: str | None = None
                 if raw_index is not None:
-                    index_m3, index_conversion_source = _to_m3(raw_index, index_unit)
+                    index_m3, index_conversion_source = _to_m3(raw_index, index_unit, inferred_unknown_unit)
 
                 result.append({
                     "date": date_str,
@@ -571,6 +782,9 @@ class EauGrandLyonApi:
             except (ValueError, TypeError):
                 _LOGGER.debug("Entrée journalière ignorée (format inattendu) : %s", e)
                 continue
+
+        # Garantit un ordre chronologique stable pour les graphiques Lovelace.
+        result.sort(key=lambda x: x.get("date") or "")
         return result
 
     @staticmethod

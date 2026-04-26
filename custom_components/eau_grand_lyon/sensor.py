@@ -334,8 +334,20 @@ class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         daily = self._contract.get("consommations_journalieres", [])
+        latest_with_date = next((e for e in reversed(daily) if e.get("date")), None)
         return {
             "nb_jours_inclus": len(daily[-30:]),
+            "derniere_date_disponible": latest_with_date.get("date") if latest_with_date else None,
+            "historique_journalier": [
+                {
+                    "date": e.get("date"),
+                    "consommation_m3": e.get("consommation_m3"),
+                    "consommation_brute": e.get("consommation_brute"),
+                    "unite_brute": e.get("unite_brute"),
+                    "conversion_source": e.get("conversion_source"),
+                }
+                for e in daily
+            ],
             "derniers_30j": [
                 {
                     "date": e["date"],
