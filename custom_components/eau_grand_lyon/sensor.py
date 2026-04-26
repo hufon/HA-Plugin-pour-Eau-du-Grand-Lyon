@@ -46,7 +46,6 @@ async def async_setup_entry(
         )
         entities.append(EauGrandLyonConsommationAnnuelleSensor(coordinator, entry, ref))
         # ── Consommations journalières (si compteur compatible) ───────
-        entities.append(EauGrandLyonConso7JSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonConso30JSensor(coordinator, entry, ref))
         entities.append(EauGrandLyonIndexJournalierSensor(coordinator, entry, ref))
         # ── Coûts estimés ─────────────────────────────────────────────
@@ -276,42 +275,6 @@ class _EauGrandLyonDailyBase(_EauGrandLyonBase):
         )
 
 
-class EauGrandLyonConso7JSensor(_EauGrandLyonDailyBase):
-    """Consommation sur les 7 derniers jours (compteur Téléo/TIC uniquement)."""
-
-    _attr_device_class = SensorDeviceClass.WATER
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = "m³"
-    _attr_icon = "mdi:water-sync"
-    _attr_name = "Consommation 7 jours"
-    _attr_suggested_display_precision = 2
-    _attr_entity_registry_enabled_default = False  # désactivé par défaut
-
-    def __init__(self, coordinator, entry, contract_ref):
-        super().__init__(coordinator, entry, contract_ref)
-        self._attr_unique_id = f"{entry.entry_id}_{contract_ref}_conso_7j"
-
-    @property
-    def native_value(self) -> float | None:
-        return self._contract.get("consommation_7j")
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        daily = self._contract.get("consommations_journalieres", [])
-        return {
-            "derniers_jours": [
-                {
-                    "date": e["date"],
-                    "consommation_m3": e["consommation_m3"],
-                    "consommation_brute": e.get("consommation_brute"),
-                    "unite_brute": e.get("unite_brute"),
-                    "conversion_source": e.get("conversion_source"),
-                }
-                for e in daily[-7:]
-            ],
-        }
-
-
 class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
     """Consommation sur les 30 derniers jours (compteur Téléo/TIC uniquement)."""
 
@@ -321,7 +284,6 @@ class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
     _attr_icon = "mdi:water-sync"
     _attr_name = "Consommation 30 jours"
     _attr_suggested_display_precision = 2
-    _attr_entity_registry_enabled_default = False  # désactivé par défaut
 
     def __init__(self, coordinator, entry, contract_ref):
         super().__init__(coordinator, entry, contract_ref)
@@ -370,7 +332,6 @@ class EauGrandLyonIndexJournalierSensor(_EauGrandLyonDailyBase):
     _attr_icon = "mdi:counter"
     _attr_name = "Index journalier (dernier)"
     _attr_suggested_display_precision = 3
-    _attr_entity_registry_enabled_default = False  # désactivé par défaut
 
     def __init__(self, coordinator, entry, contract_ref):
         super().__init__(coordinator, entry, contract_ref)

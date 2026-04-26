@@ -32,7 +32,7 @@ Cette intégration vous permet de surveiller votre utilisation de l'eau et les i
 
 ### Consommations journalières
 - L'intégration tente automatiquement 2 endpoints API possibles si un jour cela est disponible...
-- Si compteur est compatible Téléo/TIC, les capteurs "7 jours" et "30 jours" deviennent disponibles
+- Si compteur est compatible Téléo/TIC, le capteur "30 jours" et l'"Index journalier (dernier)" deviennent disponibles
 - Sinon, ils restent silencieux (aucune erreur)
 
 Inclut également un bouton pour déclencher manuellement une mise à jour des données.

@@ -71,7 +71,6 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
                 "mois_manquants":              list[str],
                 # — Consommations journalières (si compteur compatible) —
                 "consommations_journalieres":  list[dict],   # [] si non disponible
-                "consommation_7j":             float | None,
                 "consommation_30j":            float | None,
                 # — Coûts estimés —
                 "cout_mois_courant_eur":       float | None,
@@ -329,7 +328,6 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
             raw_daily = await self.api.get_daily_consumptions(cid, nb_jours=90)
             consos_journalieres = EauGrandLyonApi.format_daily_consumptions(raw_daily)
 
-            conso_7j: float | None = None
             conso_30j: float | None = None
             index_journalier_dernier: float | None = None
             index_journalier_dernier_date: str | None = None
@@ -337,9 +335,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
             index_journalier_dernier_unite: str | None = None
             index_journalier_dernier_source: str | None = None
             if consos_journalieres:
-                recent_7 = consos_journalieres[-7:]
                 recent_30 = consos_journalieres[-30:]
-                conso_7j = round(sum(e["consommation_m3"] for e in recent_7), 2)
                 conso_30j = round(sum(e["consommation_m3"] for e in recent_30), 2)
 
                 # Dernier index disponible dans l'historique journalier
@@ -375,7 +371,6 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[dict]):
                 "label_n1": label_n1,
                 "mois_manquants": mois_manquants,
                 "consommations_journalieres": consos_journalieres,
-                "consommation_7j": conso_7j,
                 "consommation_30j": conso_30j,
                 "index_journalier_dernier": index_journalier_dernier,
                 "index_journalier_dernier_date": index_journalier_dernier_date,
