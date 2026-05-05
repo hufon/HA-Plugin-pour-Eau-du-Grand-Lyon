@@ -45,11 +45,8 @@ _LOGGER = logging.getLogger(__name__)
 _EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
 
-def _validate_email(value: str) -> str:
-    value = value.strip()
-    if not _EMAIL_REGEX.match(value):
-        raise vol.Invalid("invalid_email")
-    return value
+def _is_valid_email(value: str) -> bool:
+    return bool(_EMAIL_REGEX.match((value or "").strip()))
 
 
 async def _authenticate_and_handle_errors(
@@ -81,7 +78,7 @@ async def _authenticate_and_handle_errors(
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_EMAIL): vol.All(str, _validate_email),
+        vol.Required(CONF_EMAIL): str,
         vol.Required(CONF_PASSWORD): vol.All(str, vol.Length(min=4)),
         vol.Optional(CONF_TARIF_M3, default=DEFAULT_TARIF_M3): vol.All(
             vol.Coerce(float), vol.Range(min=0.5, max=30.0)
@@ -134,9 +131,12 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            email = user_input[CONF_EMAIL]
+            email = user_input[CONF_EMAIL].strip()
             password = user_input[CONF_PASSWORD]
-            errors = await _authenticate_and_handle_errors(email, password, " (reauth)")
+            if not _is_valid_email(email):
+                errors[CONF_EMAIL] = "invalid_email"
+            else:
+                errors = await _authenticate_and_handle_errors(email, password, " (reauth)")
             if not errors:
                 self.hass.config_entries.async_update_entry(
                     config_entry,
@@ -156,9 +156,7 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_EMAIL, default=current_email): vol.All(
-                        str, _validate_email
-                    ),
+                    vol.Required(CONF_EMAIL, default=current_email): str,
                     vol.Required(CONF_PASSWORD): vol.All(str, vol.Length(min=4)),
                 }
             ),
@@ -181,9 +179,12 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            email = user_input[CONF_EMAIL]
+            email = user_input[CONF_EMAIL].strip()
             password = user_input[CONF_PASSWORD]
-            errors = await _authenticate_and_handle_errors(email, password, " (reconfigure)")
+            if not _is_valid_email(email):
+                errors[CONF_EMAIL] = "invalid_email"
+            else:
+                errors = await _authenticate_and_handle_errors(email, password, " (reconfigure)")
             if not errors:
                 self.hass.config_entries.async_update_entry(
                     config_entry,
@@ -208,9 +209,7 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_EMAIL, default=current_email): vol.All(
-                        str, _validate_email
-                    ),
+                    vol.Required(CONF_EMAIL, default=current_email): str,
                     vol.Required(CONF_PASSWORD): vol.All(str, vol.Length(min=4)),
                     vol.Optional(
                         CONF_TARIF_M3,
@@ -231,9 +230,12 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            email = user_input[CONF_EMAIL]  # already stripped and validated by schema
+            email = user_input[CONF_EMAIL].strip()
             password = user_input[CONF_PASSWORD]
-            errors = await _authenticate_and_handle_errors(email, password)
+            if not _is_valid_email(email):
+                errors[CONF_EMAIL] = "invalid_email"
+            else:
+                errors = await _authenticate_and_handle_errors(email, password)
             if not errors:
                 await self.async_set_unique_id(email.lower())
                 self._abort_if_unique_id_configured()

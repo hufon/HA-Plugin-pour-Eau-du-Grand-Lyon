@@ -33,7 +33,8 @@
       "cannot_connect": "Impossible de se connecter au serveur. Vérifiez votre réseau.",
       "waf_blocked": "La requête a été bloquée par le pare-feu web. Augmentez l'intervalle de mise à jour (recommandé : {recommended_interval}h) ou patientez quelques minutes.",
       "api_error": "Erreur côté API. Vérifiez le statut du service Eau du Grand Lyon.",
-      "unknown": "Erreur inconnue. Consultez les logs Home Assistant pour plus de détails."
+      "unknown": "Erreur inconnue. Consultez les logs Home Assistant pour plus de détails.",
+      "invalid_email": "Invalid email address"
     },
     "abort": {
       "already_configured": "Ce compte est déjà configuré.",
