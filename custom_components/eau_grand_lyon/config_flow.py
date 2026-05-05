@@ -252,7 +252,6 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={
                 "site_url": "https://agence.eaudugrandlyon.com",
-                "recommended_interval": str(DEFAULT_UPDATE_INTERVAL_HOURS),
             },
         )
 
