@@ -12,11 +12,16 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
+from typing import TYPE_CHECKING
+
 from .coordinator import EauGrandLyonCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-EauGrandLyonConfigEntry = ConfigEntry[EauGrandLyonCoordinator]
+if TYPE_CHECKING:
+    EauGrandLyonConfigEntry = ConfigEntry[EauGrandLyonCoordinator]
+else:
+    EauGrandLyonConfigEntry = ConfigEntry
 
 # This integration only supports config entries, no YAML configuration
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
