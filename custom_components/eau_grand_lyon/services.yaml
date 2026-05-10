@@ -1,17 +1,14 @@
-# ── Services Eau du Grand Lyon ─────────────────────────────────────────
-
 clear_cache:
   name: Effacer le cache local
   description: >
     Supprime le cache persistant (historique et consommations enregistrées)
-    et réinitialise les capteurs. Utile en cas de corruption de données.
+    et réinitialise les capteurs.
 
 update_now:
   name: Mettre à jour maintenant
   description: >
     Force une synchronisation immédiate avec les serveurs Eau du Grand Lyon,
-    en ignorant l'intervalle de mise à jour configuré (mais en respectant
-    toujours le rate-limiting de 30s).
+    en ignorant l'intervalle de mise à jour configuré.
 
 export_data:
   name: Exporter les données
@@ -21,9 +18,11 @@ export_data:
   fields:
     path:
       name: Chemin du fichier
-      description: Chemin complet du fichier CSV (ex. /config/exports/eau.csv)
+      description: Chemin complet du fichier CSV.
       example: "/config/exports/ma_conso_eau.csv"
       default: "/config/exports/eau_grand_lyon_history.csv"
+      selector:
+        text:
 
 download_latest_invoice:
   name: Télécharger la dernière facture
@@ -33,11 +32,15 @@ download_latest_invoice:
   fields:
     path:
       name: Chemin de destination
-      description: Chemin complet du fichier PDF (ex. /config/www/facture.pdf)
+      description: Chemin complet du fichier PDF.
       example: "/config/www/eau_grand_lyon/derniere_facture.pdf"
       default: "/config/www/eau_grand_lyon/latest_invoice.pdf"
+      selector:
+        text:
     contract_reference:
       name: Référence du contrat
-      description: Numéro de contrat spécifique (optionnel). Si absent, utilise le premier contrat avec factures.
+      description: Numéro de contrat spécifique. Si absent, utilise le premier contrat avec factures.
       example: "AB1234567890"
       required: false
+      selector:
+        text:

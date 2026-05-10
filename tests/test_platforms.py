@@ -57,6 +57,8 @@ def _make_switch(coordinator_data=None, entry=None, hass=None):
     switch._entry = entry
     switch.hass = hass
     switch._attr_unique_id = f"{entry.entry_id}_vacation_mode"
+    switch._attr_is_on = False
+    coordinator.vacation_mode = False
     switch.async_write_ha_state = MagicMock()
     return switch
 
@@ -123,28 +125,24 @@ class TestVacationSwitch:
 
     def test_is_on_default_false(self):
         s = _make_switch()
-        assert s.is_on is False
-
-    def test_is_on_when_enabled(self):
-        hass = MagicMock()
-        hass.data = {"eau_grand_lyon": {"vacation_mode": True}}
-        s = _make_switch(hass=hass)
-        assert s.is_on is True
+        assert s._attr_is_on is False
 
     async def test_async_turn_on(self):
-        hass = MagicMock()
-        hass.data = {}
-        s = _make_switch(hass=hass)
+        s = _make_switch()
+        s.async_write_ha_state = MagicMock()
         await s.async_turn_on()
-        assert hass.data["eau_grand_lyon"]["vacation_mode"] is True
+        assert s._attr_is_on is True
+        assert s.coordinator.vacation_mode is True
         s.async_write_ha_state.assert_called_once()
 
     async def test_async_turn_off(self):
-        hass = MagicMock()
-        hass.data = {"eau_grand_lyon": {"vacation_mode": True}}
-        s = _make_switch(hass=hass)
+        s = _make_switch()
+        s.coordinator.vacation_mode = True
+        s._attr_is_on = True
+        s.async_write_ha_state = MagicMock()
         await s.async_turn_off()
-        assert hass.data["eau_grand_lyon"]["vacation_mode"] is False
+        assert s._attr_is_on is False
+        assert s.coordinator.vacation_mode is False
         s.async_write_ha_state.assert_called_once()
 
 

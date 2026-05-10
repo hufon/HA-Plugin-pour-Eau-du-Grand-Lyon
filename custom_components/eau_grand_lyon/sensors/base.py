@@ -1,8 +1,9 @@
 """Classes de base pour les sensors Eau du Grand Lyon."""
 from __future__ import annotations
 
-from datetime import datetime
 from typing import TYPE_CHECKING, Any
+
+from homeassistant.util import dt as dt_util
 
 from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
 from homeassistant.config_entries import ConfigEntry
@@ -38,7 +39,7 @@ class _EauGrandLyonBase(CoordinatorEntity[EauGrandLyonCoordinator], SensorEntity
 
     @property
     def _current_year_str(self) -> str:
-        return f"{datetime.now().year}-01-01"
+        return f"{dt_util.now().year}-01-01"
 
     @property
     def _contract(self) -> dict:
@@ -58,7 +59,7 @@ class _EauGrandLyonBase(CoordinatorEntity[EauGrandLyonCoordinator], SensorEntity
         return DeviceInfo(
             identifiers={(DOMAIN, f"{self._entry.entry_id}_{self._contract_ref}")},
             name="Eau du Grand Lyon",
-            manufacturer="Morgeek",
+            manufacturer="Eau du Grand Lyon",
             model=", ".join(model_parts) or "Compteur eau",
             serial_number=numero_compteur,
             configuration_url="https://agence.eaudugrandlyon.com",
@@ -85,7 +86,7 @@ class _EauGrandLyonGlobalBase(CoordinatorEntity[EauGrandLyonCoordinator], Sensor
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name="Eau du Grand Lyon",
-            manufacturer="Morgeek",
+            manufacturer="Eau du Grand Lyon",
         )
 
 

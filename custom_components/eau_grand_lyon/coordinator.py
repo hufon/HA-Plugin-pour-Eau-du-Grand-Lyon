@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import json
 import random
 import time
@@ -14,32 +13,12 @@ import aiohttp
 
 import calendar
 import re
+from async_lru import alru_cache
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
-try:
-    from async_lru import alru_cache
-except ImportError:
-    def alru_cache(maxsize: int | None = 128):
-        """Fallback async memoization when async_lru is unavailable."""
-
-        def decorator(func):
-            cache: dict[tuple, asyncio.Task] = {}
-
-            @functools.wraps(func)
-            async def wrapper(*args, **kwargs):
-                key = (args, tuple(sorted(kwargs.items())))
-                task = cache.get(key)
-                if task is None:
-                    task = asyncio.create_task(func(*args, **kwargs))
-                    cache[key] = task
-                return await task
-
-            return wrapper
-
-        return decorator
 
 try:
     from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
@@ -175,6 +154,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._entry = entry
         self._prev_nb_alertes = 0
         self._max_retries = int(options.get(CONF_MAX_RETRIES, DEFAULT_MAX_RETRIES))
+        self.vacation_mode = False
 
         # Mode expérimental — lu depuis les options
 
@@ -216,8 +196,8 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
         if experimental:
             _LOGGER.info(
-                "Eau du Grand Lyon — mode EXPÉRIMENTAL activé : nouveaux endpoints /rest/produits/"
-                " actifs. En cas de problème, désactivez dans les options de l'intégration."
+                "Eau du Grand Lyon — EXPERIMENTAL mode enabled: /rest/produits/ endpoints active. "
+                "Disable in integration options if you hit issues."
             )
 
     async def async_initialize(self) -> None:
@@ -238,11 +218,11 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
             if stored_history and isinstance(stored_history, dict):
                 self._monthly_history = stored_history
                 _LOGGER.debug(
-                    "Historique mensuel chargé : %d contrat(s)",
+                    "Loaded monthly history: %d contract(s)",
                     len(self._monthly_history),
                 )
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("Erreur chargement historique mensuel : %s", err)
+        except (json.JSONDecodeError, OSError) as err:
+            _LOGGER.warning("Failed to load monthly history: %s", err)
 
         try:
             stored = await self._store.async_load()
@@ -265,7 +245,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     and datetime.now(timezone.utc) - cache_saved_at > timedelta(days=CACHE_MAX_AGE_DAYS)
                 ):
                     _LOGGER.warning(
-                        "Cache persistant ignore car trop ancien (%d jours max)",
+                        "Discarding persistent cache (older than %d days)",
                         CACHE_MAX_AGE_DAYS,
                     )
                     await self._store.async_remove()
@@ -277,11 +257,9 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 )
                 self.data = stored
                 self._last_good_data = stored
-                _LOGGER.debug("Données persistantes chargées (cache hors-ligne disponible)")
+                _LOGGER.debug("Loaded persistent data (offline cache available)")
         except (json.JSONDecodeError, OSError, KeyError) as err:
-            _LOGGER.warning("Erreur chargement données persistantes : %s", err)
-        except Exception as err:
-            _LOGGER.warning("Erreur inattendue chargement données persistantes : %s", err)
+            _LOGGER.warning("Failed to load persisted data: %s", err)
 
     async def _save_persistent_data(self) -> None:
         """Sauvegarde les données persistantes (jamais l'état offline)."""
@@ -303,19 +281,17 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 if isinstance(ts, datetime):
                     data_to_save[key] = ts.isoformat()
             await self._store.async_save(data_to_save)
-            _LOGGER.debug("Données persistantes sauvegardées")
+            _LOGGER.debug("Persistent data saved")
         except (json.JSONDecodeError, OSError, TypeError) as err:
-            _LOGGER.warning("Erreur sauvegarde données persistantes : %s", err)
-        except Exception as err:
-            _LOGGER.warning("Erreur inattendue sauvegarde données persistantes : %s", err)
+            _LOGGER.warning("Failed to persist data: %s", err)
 
     async def _save_monthly_history(self) -> None:
         """Persiste l'historique mensuel cumulatif sur disque."""
         try:
             await self._monthly_history_store.async_save(self._monthly_history)
-            _LOGGER.debug("Historique mensuel sauvegardé : %d contrat(s)", len(self._monthly_history))
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("Erreur sauvegarde historique mensuel : %s", err)
+            _LOGGER.debug("Saved monthly history: %d contract(s)", len(self._monthly_history))
+        except (OSError, TypeError) as err:
+            _LOGGER.warning("Failed to save monthly history: %s", err)
 
     @staticmethod
     def _merge_monthly_history(
@@ -350,7 +326,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
         self._monthly_history = {}
         self.data = {}
         self._last_good_data = None
-        _LOGGER.info("Cache persistant Eau du Grand Lyon supprimé")
+        _LOGGER.info("Eau du Grand Lyon persistent cache cleared")
 
     async def async_close(self) -> None:
         """Révoque le token et ferme la session aiohttp dédiée."""
@@ -383,7 +359,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
             elapsed = mono_now - self._last_request_mono
             if elapsed < self._min_request_delay_s:
                 delay_needed = self._min_request_delay_s - elapsed
-                _LOGGER.debug("Rate limiting : attente %.1f s", delay_needed)
+                _LOGGER.debug("Rate limiting: waiting %.1fs", delay_needed)
                 await asyncio.sleep(delay_needed)
         self._last_request_mono = time.monotonic()
 
@@ -416,14 +392,14 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= 5:
                     _LOGGER.warning(
-                        "Eau du Grand Lyon — %d échecs consécutifs (WAF). "
-                        "Vérifiez l'intervalle de mise à jour dans les options (recommandé : 24h).",
+                        "Eau du Grand Lyon — %d consecutive WAF failures. "
+                        "Check the update interval in integration options (recommended: 24h).",
                         self._consecutive_failures,
                     )
                 if attempt < self._max_retries - 1:
                     delay = self._compute_retry_delay(WAF_RETRY_BASE_DELAY_S, attempt)
                     _LOGGER.warning(
-                        "WAF bloqué (tentative %d/%d), retry dans %.1f s — %s",
+                        "WAF blocked (attempt %d/%d), retrying in %.1fs — %s",
                         attempt + 1, self._max_retries, delay, err,
                     )
                     await asyncio.sleep(delay)
@@ -434,24 +410,25 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 self._consecutive_failures += 1
                 if self._consecutive_failures >= 5:
                     _LOGGER.warning(
-                        "Eau du Grand Lyon — %d échecs consécutifs (réseau). "
-                        "Vérifiez la connectivité et le statut du service.",
+                        "Eau du Grand Lyon — %d consecutive network failures. "
+                        "Check connectivity and the upstream service status.",
                         self._consecutive_failures,
                     )
                 if attempt < self._max_retries - 1:
                     delay = self._compute_retry_delay(NETWORK_RETRY_BASE_DELAY_S, attempt)
                     _LOGGER.warning(
-                        "Erreur réseau (tentative %d/%d), retry dans %.1f s — %s",
+                        "Network error (attempt %d/%d), retrying in %.1fs — %s",
                         attempt + 1, self._max_retries, delay, err,
                     )
                     await asyncio.sleep(delay)
 
             except AuthenticationError as err:
-                self._entry.async_start_reauth(self.hass)
-                raise UpdateFailed(f"Erreur d'authentification: {err}") from err
+                raise ConfigEntryAuthFailed(
+                    f"Authentication failed: {err}"
+                ) from err
 
-            except Exception as err:
-                raise UpdateFailed(f"Erreur inattendue: {err}") from err
+            except Exception as err:  # noqa: BLE001
+                raise UpdateFailed(f"Unexpected error: {err}") from err
 
         # Toutes les tentatives ont échoué — mode hors-ligne si cache disponible
         cache = self._last_good_data
@@ -462,8 +439,8 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 else datetime.now(timezone.utc)
             )
             _LOGGER.warning(
-                "API indisponible après %d tentatives (%s) — mode hors-ligne activé "
-                "(données du %s)",
+                "API unavailable after %d attempts (%s) — offline mode active "
+                "(data from %s)",
                 self._max_retries,
                 last_err_type,
                 cache.get("last_update_success_time", "inconnu"),
@@ -495,7 +472,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
         cycle_api = _CycleCachedApi(self.api)
 
         raw_contracts = await cycle_api.get_contracts()
-        _LOGGER.debug("%d contrat(s) trouvé(s)", len(raw_contracts))
+        _LOGGER.debug("Found %d contract(s)", len(raw_contracts))
 
         alertes = await cycle_api.get_alertes()
         nb_alertes = len(alertes)
@@ -553,8 +530,8 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
         water_quality = await water_quality_task
         try:
             interventions_planifiees = await interventions_task
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Chargement lazy des interventions échoué : %s", err)
+        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as err:
+            _LOGGER.debug("Lazy interventions fetch failed: %s", err)
             interventions_planifiees = []
 
         drought_level = self._get_drought_level()
@@ -598,7 +575,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 try:
                     return float(state.state)
                 except (ValueError, TypeError):
-                    _LOGGER.warning("Valeur invalide pour l'entité de prix %s : %s", price_entity, state.state)
+                    _LOGGER.warning("Invalid value for price entity %s: %s", price_entity, state.state)
 
         try:
             return float(opts.get(CONF_TARIF_M3, self._entry.data.get(CONF_TARIF_M3, DEFAULT_TARIF_M3)))
@@ -895,7 +872,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
         if courbe:
             vals = [e.get("valeur", 0) for e in courbe if "valeur" in e]
             if len(vals) >= 24 and all(v > 0 for v in vals):
-                _LOGGER.warning("Fuite suspectée (pattern constant 24h+) : %s", ref)
+                _LOGGER.warning("Suspected leak (flat 24h+ pattern): %s", ref)
                 return True
         elif daily:
             recent_7 = [e["consommation_m3"] for e in daily[-7:]]
@@ -941,7 +918,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
 
     def _check_vacation_alert(self, contracts_data: dict) -> bool:
         """Vérifie si une alerte vacances doit être levée."""
-        if not self.hass.data.get(DOMAIN, {}).get("vacation_mode", False):
+        if not self.vacation_mode:
             return False
         total_24h = 0
         for c in contracts_data.values():
@@ -949,7 +926,7 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
             if daily:
                 total_24h += daily[-1].get("consommation_m3", 0)
         if total_24h > 0.001:
-            _LOGGER.warning("ALERTE VACANCES : Consommation de %.3f m³ détectée !", total_24h)
+            _LOGGER.warning("VACATION ALERT: %.3f m3 consumption detected", total_24h)
             return True
         return False
 
@@ -972,7 +949,9 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
             self._stats_month_counts: dict[str, int] = {}
 
         for ref, contract in contracts_data.items():
-            consos = contract.get("consommations", [])
+            # Use merged history (up to 36 months) so past data is always injected,
+            # not just the ~12 months the API returns on each call.
+            consos = self._monthly_history.get(ref) or contract.get("consommations", [])
             if not consos:
                 continue
 
@@ -1008,19 +987,19 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         )
                     )
                 except (KeyError, ValueError, TypeError) as err:
-                    _LOGGER.debug("Entrée statistique ignorée : %s — %s", entry, err)
+                    _LOGGER.debug("Skipping statistic entry: %s — %s", entry, err)
                     continue
 
             try:
                 async_add_external_statistics(self.hass, metadata, stats)
                 self._stats_month_counts[ref] = current_count
-                _LOGGER.debug("Statistiques injectées : contrat %s, %d mois", ref, len(stats))
-            except Exception as err:
-                _LOGGER.warning("Erreur injection statistiques pour %s : %s", ref, err)
+                _LOGGER.debug("Injected statistics: contract %s, %d months", ref, len(stats))
+            except (HomeAssistantError, ValueError) as err:
+                _LOGGER.warning("Failed to inject statistics for %s: %s", ref, err)
 
         # Inject cost statistics (EUR per month) if tarif is configured
         for ref, contract in contracts_data.items():
-            consos = contract.get("consommations", [])
+            consos = self._monthly_history.get(ref) or contract.get("consommations", [])
             tarif = contract.get("tarif_m3", 0)
             if not consos or tarif <= 0:
                 continue
@@ -1054,15 +1033,15 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                         )
                     )
                 except (KeyError, ValueError, TypeError) as err:
-                    _LOGGER.debug("Entrée coût ignorée : %s — %s", entry, err)
+                    _LOGGER.debug("Skipping cost entry: %s — %s", entry, err)
                     continue
 
             if cost_stats:
                 try:
                     async_add_external_statistics(self.hass, cost_metadata, cost_stats)
-                    _LOGGER.debug("Statistiques coût injectées : contrat %s, %d mois", ref, len(cost_stats))
-                except Exception as err:
-                    _LOGGER.warning("Erreur injection statistiques coût %s : %s", ref, err)
+                    _LOGGER.debug("Injected cost statistics: contract %s, %d months", ref, len(cost_stats))
+                except (HomeAssistantError, ValueError) as err:
+                    _LOGGER.warning("Failed to inject cost statistics for %s: %s", ref, err)
 
     def _handle_alert_notifications(self, nb_alertes: int) -> None:
         """Crée ou supprime une notification HA persistante selon les alertes."""
@@ -1089,11 +1068,11 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                     notification_id=notif_id,
                 )
             )
-            _LOGGER.info("%d alerte(s) Eau du Grand Lyon détectée(s)", nb_alertes)
+            _LOGGER.info("%d Eau du Grand Lyon alert(s) detected", nb_alertes)
 
         elif nb_alertes == 0 and self._prev_nb_alertes > 0:
             self.hass.async_create_task(pn_dismiss(self.hass, notification_id=notif_id))
-            _LOGGER.info("Alertes Eau du Grand Lyon résolues")
+            _LOGGER.info("Eau du Grand Lyon alerts cleared")
 
         self._prev_nb_alertes = nb_alertes
 

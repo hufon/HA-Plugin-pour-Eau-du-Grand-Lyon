@@ -5,6 +5,7 @@ import pytest
 
 from custom_components.eau_grand_lyon.api import ApiError, AuthenticationError, NetworkError, WafBlockedError
 from custom_components.eau_grand_lyon.coordinator import EauGrandLyonCoordinator
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 
@@ -101,11 +102,10 @@ class TestUpdateErrorPaths:
         self.coord._fetch_all_data = AsyncMock()
 
     @pytest.mark.asyncio
-    async def test_authentication_error_starts_reauth_and_raises_update_failed(self):
+    async def test_authentication_error_raises_config_entry_auth_failed(self):
         self.coord._fetch_all_data.side_effect = AuthenticationError("bad creds")
-        with pytest.raises(UpdateFailed):
+        with pytest.raises(ConfigEntryAuthFailed):
             await self.coord._async_update_data()
-        self.coord._entry.async_start_reauth.assert_called_once_with(self.coord.hass)
 
     @pytest.mark.asyncio
     async def test_unexpected_error_raises_update_failed(self):

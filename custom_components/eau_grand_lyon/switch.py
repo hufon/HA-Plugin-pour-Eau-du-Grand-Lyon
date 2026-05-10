@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -26,28 +27,34 @@ async def async_setup_entry(
 
 
 class EauGrandLyonVacationSwitch(
-    CoordinatorEntity[EauGrandLyonCoordinator], SwitchEntity
+    CoordinatorEntity[EauGrandLyonCoordinator], SwitchEntity, RestoreEntity
 ):
     """Switch pour activer le mode vacances (surveillance renforcée)."""
 
     _attr_has_entity_name = True
-    translation_key = "vacation_mode"
+    _attr_translation_key = "vacation_mode"
 
     def __init__(self, coordinator: EauGrandLyonCoordinator, entry: ConfigEntry) -> None:
         super().__init__(coordinator)
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_vacation_mode"
+        self._attr_is_on = False
 
-    @property
-    def is_on(self) -> bool:
-        return self.hass.data.get(DOMAIN, {}).get("vacation_mode", False)
+    async def async_added_to_hass(self) -> None:
+        """Restore previous on/off state across restarts."""
+        await super().async_added_to_hass()
+        last_state = await self.async_get_last_state()
+        if last_state is not None:
+            self._attr_is_on = last_state.state == "on"
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        self.hass.data.setdefault(DOMAIN, {})["vacation_mode"] = True
+        self._attr_is_on = True
+        self.coordinator.vacation_mode = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        self.hass.data.setdefault(DOMAIN, {})["vacation_mode"] = False
+        self._attr_is_on = False
+        self.coordinator.vacation_mode = False
         self.async_write_ha_state()
 
     @property

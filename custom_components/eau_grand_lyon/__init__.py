@@ -1,19 +1,23 @@
-"""Intégration Home Assistant pour Eau du Grand Lyon."""
+"""Home Assistant integration for Eau du Grand Lyon."""
 from __future__ import annotations
 
 import csv
 import logging
 import os
+from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, HomeAssistantError, ServiceValidationError
+from homeassistant.core import (
+    HomeAssistant,
+    HomeAssistantError,
+    ServiceCall,
+    ServiceValidationError,
+)
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
-from typing import TYPE_CHECKING
-
 from .coordinator import EauGrandLyonCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,224 +27,186 @@ if TYPE_CHECKING:
 else:
     EauGrandLyonConfigEntry = ConfigEntry
 
-# This integration only supports config entries, no YAML configuration
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
-
-    Platform.SENSOR, 
-    Platform.BINARY_SENSOR, 
+    Platform.SENSOR,
+    Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.SWITCH,
     Platform.CALENDAR,
 ]
 
+SERVICE_NAMES = ("clear_cache", "update_now", "export_data", "download_latest_invoice")
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
-    """Initialise l'intégration Eau du Grand Lyon."""
-    hass.data.setdefault(DOMAIN, {})
+    """Set up the integration (no YAML)."""
     return True
 
 
-async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Migre une config entry vers une nouvelle version."""
-    _LOGGER.debug("Migration de la config entry de la version %s", config_entry.version)
-
-    if config_entry.version == 1:
-        # Migration v1 -> v2 (placeholder pour future logique)
-        new_data = {**config_entry.data}
-        new_options = {**config_entry.options}
-        
-        # On force la version à 2
-        hass.config_entries.async_update_entry(
-            config_entry, data=new_data, options=new_options, version=2
-        )
-
-    _LOGGER.info("Migration vers la version %s réussie", config_entry.version)
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate a config entry to a newer version."""
+    _LOGGER.debug("Migrating config entry from version %s", entry.version)
+    if entry.version == 1:
+        hass.config_entries.async_update_entry(entry, version=2)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: EauGrandLyonConfigEntry) -> bool:
-    """Initialise l'intégration depuis une config entry."""
+    """Set up an integration instance from a config entry."""
     coordinator = EauGrandLyonCoordinator(hass, entry)
     await coordinator.async_initialize()
-
-    # Récupération initiale des données (bloquant jusqu'au premier succès)
     await coordinator.async_config_entry_first_refresh()
 
     entry.runtime_data = coordinator
-    
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Enregistrement des services (une seule fois pour toutes les instances)
     _async_setup_services(hass)
 
-    # Rechargement automatique si les options changent (intervalle de mise à jour)
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
-
     return True
 
 
+def _iter_coordinators(hass: HomeAssistant):
+    """Yield active coordinators across all config entries."""
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        coord = getattr(entry, "runtime_data", None)
+        if coord is not None:
+            yield coord
+
+
 def _async_setup_services(hass: HomeAssistant) -> None:
-    """Enregistre les services de l'intégration."""
+    """Register integration-wide services (idempotent)."""
     if hass.services.has_service(DOMAIN, "clear_cache"):
         return
 
-    async def async_handle_clear_cache(_):
-        _LOGGER.info("Service clear_cache appelé — réinitialisation de tous les caches")
-        try:
-            for entry in hass.config_entries.async_entries(DOMAIN):
-                if hasattr(entry, "runtime_data"):
-                    await entry.runtime_data.async_clear_cache()
-        except Exception as err:
-            raise HomeAssistantError(f"Failed to clear cache: {err}") from err
+    async def async_handle_clear_cache(call: ServiceCall) -> None:
+        for coord in _iter_coordinators(hass):
+            await coord.async_clear_cache()
 
-    async def async_handle_update_now(_):
-        _LOGGER.info("Service update_now appelé — rafraîchissement immédiat")
-        try:
-            for entry in hass.config_entries.async_entries(DOMAIN):
-                if hasattr(entry, "runtime_data"):
-                    await entry.runtime_data.async_refresh()
-        except Exception as err:
-            raise HomeAssistantError(f"Failed to update: {err}") from err
+    async def async_handle_update_now(call: ServiceCall) -> None:
+        for coord in _iter_coordinators(hass):
+            await coord.async_refresh()
 
-    async def async_handle_export_data(call):
-        """Exporte les données vers un fichier CSV."""
+    async def async_handle_export_data(call: ServiceCall) -> None:
         export_path = call.data.get("path", "/config/exports/eau_grand_lyon_history.csv")
-        if not export_path or not isinstance(export_path, str):
+        if not isinstance(export_path, str) or not export_path.strip():
             raise ServiceValidationError("path must be a non-empty string")
 
-        _LOGGER.info("Service export_data appelé — export vers %s", export_path)
+        coordinators = list(_iter_coordinators(hass))
 
-        def _do_export():
-            """Opération de fichier bloquante effectuée dans l'executor."""
+        def _do_export() -> None:
             os.makedirs(os.path.dirname(export_path), exist_ok=True)
-            with open(export_path, 'w', newline='', encoding='utf-8') as csvfile:
+            with open(export_path, "w", newline="", encoding="utf-8") as csvfile:
                 writer = csv.writer(csvfile)
-                # Header
                 writer.writerow(["Contrat", "Type", "Date/Label", "Valeur (m3)", "Détails"])
-
-                for entry in hass.config_entries.async_entries(DOMAIN):
-                    if not hasattr(entry, "runtime_data"):
-                        continue
-                    coord = entry.runtime_data
+                for coord in coordinators:
                     if not coord.data:
                         continue
                     for ref, contract in coord.data.get("contracts", {}).items():
-                        # Mensuel
                         for c_entry in contract.get("consommations", []):
                             writer.writerow([
                                 ref, "MENSUEL", c_entry.get("label"),
                                 c_entry.get("consommation_m3"),
-                                f"Année {c_entry.get('annee')}"
+                                f"Année {c_entry.get('annee')}",
                             ])
-                        # Journalier
                         for c_entry in contract.get("consommations_journalieres", []):
                             writer.writerow([
                                 ref, "JOURNALIER", c_entry.get("date"),
                                 c_entry.get("consommation_m3"),
-                                f"Index {c_entry.get('index_m3')}"
+                                f"Index {c_entry.get('index_m3')}",
                             ])
 
         try:
             await hass.async_add_executor_job(_do_export)
-            _LOGGER.info("Export réussi : %s", export_path)
         except PermissionError as err:
-            raise HomeAssistantError(f"Permission denied writing to {export_path}") from err
+            raise HomeAssistantError(
+                f"Permission denied writing to {export_path}"
+            ) from err
         except OSError as err:
             raise HomeAssistantError(f"Failed to export data: {err}") from err
 
-    async def async_handle_download_invoice(call):
-        """Télécharge la dernière facture PDF.
-
-        Si contract_reference est spécifié, télécharge depuis ce contrat.
-        Sinon, télécharge du premier contrat avec des factures.
-        """
+    async def async_handle_download_invoice(call: ServiceCall) -> None:
         target_path = call.data.get("path", "/config/www/eau_grand_lyon/latest_invoice.pdf")
         contract_ref_filter = call.data.get("contract_reference")
-
-        if not target_path or not isinstance(target_path, str):
+        if not isinstance(target_path, str) or not target_path.strip():
             raise ServiceValidationError("path must be a non-empty string")
 
-        _LOGGER.info(
-            "Service download_latest_invoice appelé — cible: %s%s",
-            target_path,
-            f" — contrat: {contract_ref_filter}" if contract_ref_filter else "",
-        )
-
-        for entry in hass.config_entries.async_entries(DOMAIN):
-            if not hasattr(entry, "runtime_data"):
-                continue
-            coord = entry.runtime_data
+        for coord in _iter_coordinators(hass):
             if not coord.data:
                 continue
             for contract_ref, contract in coord.data.get("contracts", {}).items():
-                # Si un contrat est spécifié, ne traiter que celui-ci
                 if contract_ref_filter and contract_ref != contract_ref_filter:
                     continue
                 factures = contract.get("factures", [])
-                if factures:
-                    latest = factures[0]
-                    ref = latest["reference"]
-                    try:
-                        pdf_data = await coord.api.get_invoice_pdf(ref)
+                if not factures:
+                    continue
+                ref = factures[0]["reference"]
+                try:
+                    pdf_data = await coord.api.get_invoice_pdf(ref)
+                except (OSError, ValueError, KeyError) as err:
+                    raise HomeAssistantError(
+                        f"Failed to download invoice {ref}: {err}"
+                    ) from err
 
-                        def _save_pdf():
-                            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                            with open(target_path, "wb") as f:
-                                f.write(pdf_data)
+                def _save_pdf() -> None:
+                    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+                    with open(target_path, "wb") as fh:
+                        fh.write(pdf_data)
 
-                        await hass.async_add_executor_job(_save_pdf)
-                        _LOGGER.info("Facture %s (contrat %s) téléchargée avec succès", ref, contract_ref)
+                try:
+                    await hass.async_add_executor_job(_save_pdf)
+                except PermissionError as err:
+                    raise HomeAssistantError(
+                        f"Permission denied writing to {target_path}"
+                    ) from err
+                except OSError as err:
+                    raise HomeAssistantError(f"Failed to save invoice: {err}") from err
 
-                        # Derive the /local/ URL from the saved path so the user
-                        # can download the file directly to their device.
-                        www_root = hass.config.path("www")
-                        try:
-                            rel = os.path.relpath(target_path, www_root)
-                            download_url = f"/local/{rel}"
-                        except ValueError:
-                            download_url = None
-
-                        if download_url:
-                            await hass.services.async_call(
-                                "persistent_notification",
-                                "create",
-                                {
-                                    "title": "📄 Facture Eau du Grand Lyon",
-                                    "message": (
-                                        f"Facture du contrat {contract_ref} téléchargée. "
-                                        f"[Télécharger le PDF]({download_url})"
-                                    ),
-                                    "notification_id": f"eau_grand_lyon_invoice_{contract_ref}",
-                                },
-                            )
-                        return
-                    except PermissionError as err:
-                        raise HomeAssistantError(f"Permission denied writing to {target_path}") from err
-                    except (OSError, IOError) as err:
-                        raise HomeAssistantError(f"Failed to save invoice: {err}") from err
-                    except Exception as err:
-                        raise HomeAssistantError(f"Failed to download invoice: {err}") from err
+                www_root = hass.config.path("www")
+                try:
+                    rel = os.path.relpath(target_path, www_root)
+                    download_url = f"/local/{rel}"
+                except ValueError:
+                    download_url = None
+                if download_url:
+                    await hass.services.async_call(
+                        "persistent_notification",
+                        "create",
+                        {
+                            "title": "Facture Eau du Grand Lyon",
+                            "message": (
+                                f"Facture du contrat {contract_ref} téléchargée. "
+                                f"[Télécharger le PDF]({download_url})"
+                            ),
+                            "notification_id": f"eau_grand_lyon_invoice_{contract_ref}",
+                        },
+                    )
+                return
 
         if contract_ref_filter:
-            raise HomeAssistantError(f"No invoices found for contract {contract_ref_filter}")
+            raise HomeAssistantError(
+                f"No invoices found for contract {contract_ref_filter}"
+            )
         raise HomeAssistantError("No invoices found")
 
     hass.services.async_register(DOMAIN, "clear_cache", async_handle_clear_cache)
-    hass.services.async_register(DOMAIN, "update_now",  async_handle_update_now)
+    hass.services.async_register(DOMAIN, "update_now", async_handle_update_now)
     hass.services.async_register(DOMAIN, "export_data", async_handle_export_data)
-    hass.services.async_register(DOMAIN, "download_latest_invoice", async_handle_download_invoice)
+    hass.services.async_register(
+        DOMAIN, "download_latest_invoice", async_handle_download_invoice
+    )
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EauGrandLyonConfigEntry) -> bool:
-    """Décharge une config entry."""
+    """Unload a config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         await entry.runtime_data.async_close()
 
-    # Nettoyage des services si plus aucune entry active
     if not hass.config_entries.async_entries(DOMAIN):
-        for service_name in ("clear_cache", "update_now", "export_data", "download_latest_invoice"):
+        for service_name in SERVICE_NAMES:
             if hass.services.has_service(DOMAIN, service_name):
                 hass.services.async_remove(DOMAIN, service_name)
 
@@ -248,9 +214,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: EauGrandLyonConfigEntry
 
 
 async def _async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Recharge l'intégration quand les options changent."""
-    _LOGGER.debug(
-        "Options modifiées pour %s, rechargement de l'intégration", entry.title
-    )
+    """Reload the integration when options change."""
     await hass.config_entries.async_reload(entry.entry_id)
 

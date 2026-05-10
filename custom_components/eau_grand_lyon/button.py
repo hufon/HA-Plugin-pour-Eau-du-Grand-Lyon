@@ -63,12 +63,12 @@ class EauGrandLyonRefreshButton(
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
             name="Eau du Grand Lyon",
-            manufacturer="Morgeek",
+            manufacturer="Eau du Grand Lyon",
         )
 
     async def async_press(self) -> None:
         """Déclenche immédiatement une mise à jour des données."""
-        _LOGGER.debug("Rafraîchissement manuel déclenché par l'utilisateur")
+        _LOGGER.debug("Manual refresh triggered by user")
         await self.coordinator.async_request_refresh()
 
 
@@ -104,7 +104,7 @@ class EauGrandLyonDownloadInvoiceButton(
 
     async def async_press(self) -> None:
         """Déclenche le téléchargement via le service."""
-        _LOGGER.debug("Téléchargement de facture déclenché par bouton")
+        _LOGGER.debug("Invoice download triggered by button")
         await self.hass.services.async_call(
             DOMAIN,
             "download_latest_invoice",

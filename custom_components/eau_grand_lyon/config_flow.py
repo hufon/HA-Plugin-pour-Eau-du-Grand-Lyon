@@ -59,19 +59,19 @@ async def _authenticate_and_handle_errors(
         try:
             await api.authenticate()
         except AuthenticationError as err:
-            _LOGGER.warning("Auth échouée%s: %s", context, err)
+            _LOGGER.warning("Authentication failed%s: %s", context, err)
             errors["base"] = "invalid_auth"
         except WafBlockedError as err:
-            _LOGGER.warning("Blocage WAF%s: %s", context, err)
+            _LOGGER.warning("WAF blocked%s: %s", context, err)
             errors["base"] = "waf_blocked"
         except NetworkError as err:
-            _LOGGER.warning("Erreur réseau%s: %s", context, err)
+            _LOGGER.warning("Network error%s: %s", context, err)
             errors["base"] = "cannot_connect"
         except ApiError as err:
-            _LOGGER.warning("Erreur API%s: %s", context, err)
+            _LOGGER.warning("API error%s: %s", context, err)
             errors["base"] = "api_error"
         except Exception as err:  # noqa: BLE001
-            _LOGGER.exception("Erreur inattendue%s: %s", context, err)
+            _LOGGER.exception("Unexpected error%s: %s", context, err)
             errors["base"] = "unknown"
     return errors
 
@@ -104,7 +104,7 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: ConfigEntry,
     ) -> EauGrandLyonOptionsFlowHandler:
         """Retourne le gestionnaire du flux d'options."""
-        return EauGrandLyonOptionsFlowHandler(config_entry)
+        return EauGrandLyonOptionsFlowHandler()
 
     async def async_step_reauth(
         self, user_input: dict[str, Any] | None = None
@@ -161,9 +161,6 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
-            description_placeholders={
-                "site_url": "https://agence.eaudugrandlyon.com",
-            },
         )
 
     async def async_step_reconfigure(
@@ -218,9 +215,6 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
             ),
             errors=errors,
-            description_placeholders={
-                "site_url": "https://agence.eaudugrandlyon.com",
-            },
         )
 
     async def async_step_user(
@@ -261,10 +255,6 @@ class EauGrandLyonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class EauGrandLyonOptionsFlowHandler(config_entries.OptionsFlow):
     """Options : intervalle de mise à jour + tarif au m³."""
 
-    def __init__(self, config_entry: ConfigEntry) -> None:
-        super().__init__()
-        self._config_entry = config_entry
-
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.FlowResult:
@@ -272,12 +262,12 @@ class EauGrandLyonOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        opts = self._config_entry.options or {}
+        opts = self.config_entry.options or {}
         current_interval = int(opts.get(CONF_UPDATE_INTERVAL_HOURS, DEFAULT_UPDATE_INTERVAL_HOURS))
         current_tarif = float(
             opts[CONF_TARIF_M3]
             if CONF_TARIF_M3 in opts
-            else self._config_entry.data.get(CONF_TARIF_M3, DEFAULT_TARIF_M3)
+            else self.config_entry.data.get(CONF_TARIF_M3, DEFAULT_TARIF_M3)
         )
         current_experimental = bool(opts.get(CONF_EXPERIMENTAL, DEFAULT_EXPERIMENTAL))
         current_max_retries = int(opts.get(CONF_MAX_RETRIES, DEFAULT_MAX_RETRIES))
@@ -326,8 +316,4 @@ class EauGrandLyonOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=options_schema,
-            description_placeholders={
-                "hardness_lyon_avg": str(DEFAULT_WATER_HARDNESS),
-                "subscription_example": "180",
-            },
         )

@@ -321,7 +321,7 @@ class EauGrandLyonApi:
                     err,
                 )
             except Exception as err:
-                _LOGGER.debug("Erreur sur %s (contrat %s) : %s", source_name, contract_id, err)
+                _LOGGER.debug("Error on %s (contract %s): %s", source_name, contract_id, err)
         return [], "Aucune"
 
     async def get_alertes(self) -> list[dict]:
@@ -332,7 +332,7 @@ class EauGrandLyonApi:
             )
             return data if isinstance(data, list) else []
         except Exception as err:
-            _LOGGER.debug("Erreur recuperation alertes : %s", err)
+            _LOGGER.debug("Failed to fetch alerts: %s", err)
             return []
 
     async def get_date_prochaine_facture(self, contract_id: str) -> str | None:
@@ -347,7 +347,7 @@ class EauGrandLyonApi:
                 return str(raw)[:10] if raw else None
             return None
         except Exception as err:
-            _LOGGER.debug("Erreur get_date_prochaine_facture (contrat %s) : %s", contract_id, err)
+            _LOGGER.debug("get_date_prochaine_facture failed (contract %s): %s", contract_id, err)
             return None
 
     async def get_point_de_service_etendu(self, contract_id: str) -> dict:
@@ -445,7 +445,7 @@ class EauGrandLyonApi:
             _LOGGER.debug("Interventions planifiees : %d trouvees", len(result))
             return result
         except Exception as err:
-            _LOGGER.debug("Erreur get_interventions : %s", err)
+            _LOGGER.debug("get_interventions failed: %s", err)
             return []
 
     async def get_factures(self) -> list[dict]:
@@ -460,10 +460,10 @@ class EauGrandLyonApi:
             if "404" in str(err):
                 _LOGGER.debug("[EXPERIMENTAL] /rest/produits/factures -> 404")
             else:
-                _LOGGER.debug("[EXPERIMENTAL] Erreur get_factures : %s", err)
+                _LOGGER.debug("[EXPERIMENTAL] get_factures failed: %s", err)
             return []
         except Exception as err:
-            _LOGGER.debug("[EXPERIMENTAL] Erreur inattendue get_factures : %s", err)
+            _LOGGER.debug("[EXPERIMENTAL] Unexpected error in get_factures: %s", err)
             return []
 
     async def get_courbe_de_charge(
@@ -614,10 +614,10 @@ class EauGrandLyonApi:
                 "source": "Open Data Metropole de Lyon",
             }
         except aiohttp.ClientError as err:
-            _LOGGER.debug("[OPEN DATA] Erreur reseau qualite eau : %s", err)
+            _LOGGER.debug("[OPEN DATA] Network error fetching water quality: %s", err)
             return empty
         except Exception as err:
-            _LOGGER.debug("[OPEN DATA] Erreur inattendue qualite eau : %s", err)
+            _LOGGER.debug("[OPEN DATA] Unexpected error fetching water quality: %s", err)
             return empty
 
     @staticmethod
@@ -797,7 +797,7 @@ class EauGrandLyonApi:
                     }
                 )
             except (KeyError, ValueError, TypeError):
-                _LOGGER.debug("Facture ignoree (format inattendu) : %s", facture)
+                _LOGGER.debug("Skipping invoice (unexpected format): %s", facture)
         result.sort(key=lambda item: item.get("date_edition") or "", reverse=True)
         return result
 

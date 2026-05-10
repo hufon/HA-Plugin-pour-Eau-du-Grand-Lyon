@@ -39,6 +39,16 @@ def _stub_homeassistant() -> None:
         HomeAssistant=MagicMock,
         HomeAssistantError=_HomeAssistantError,
         ServiceValidationError=_ServiceValidationError,
+        ServiceCall=MagicMock,
+    )
+
+    class _ConfigEntryAuthFailed(Exception):
+        pass
+
+    _make_module(
+        "homeassistant.exceptions",
+        ConfigEntryAuthFailed=_ConfigEntryAuthFailed,
+        HomeAssistantError=_HomeAssistantError,
     )
     _make_module("homeassistant.const", EntityCategory=MagicMock(), Platform=MagicMock())
     class _ConfigEntry:
@@ -85,7 +95,8 @@ def _stub_homeassistant() -> None:
         BinarySensorDeviceClass=MagicMock(),
     )
     _make_module("homeassistant.components.button", ButtonEntity=object)
-    _make_module("homeassistant.components.switch", SwitchEntity=object)
+    class _SwitchEntity: pass
+    _make_module("homeassistant.components.switch", SwitchEntity=_SwitchEntity)
     _make_module("homeassistant.components.calendar", CalendarEntity=object, CalendarEvent=MagicMock)
     _make_module("homeassistant.components.recorder")
     _make_module(
@@ -109,6 +120,15 @@ def _stub_homeassistant() -> None:
         IssueSeverity=MagicMock(),
     )
     _make_module("homeassistant.helpers.aiohttp_client")
+    class _RestoreEntity:
+        async def async_get_last_state(self): return None
+    _make_module("homeassistant.helpers.restore_state", RestoreEntity=_RestoreEntity)
+    import datetime as _dt
+    _dt_util = types.ModuleType("homeassistant.util.dt")
+    _dt_util.now = lambda: _dt.datetime.now(_dt.timezone.utc)
+    _dt_util.utcnow = lambda: _dt.datetime.now(_dt.timezone.utc)
+    sys.modules["homeassistant.util.dt"] = _dt_util
+    _make_module("homeassistant.util", dt=_dt_util)
     _make_module("aiohttp")
     _make_module("tenacity",
         retry=lambda **kw: (lambda f: f),
