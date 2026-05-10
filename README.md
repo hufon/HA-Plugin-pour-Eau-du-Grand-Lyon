@@ -20,6 +20,11 @@ Ceci est une intégration personnalisée NON OFFICIELLE pour [Home Assistant](ht
 
 Voir le [CHANGELOG.md](CHANGELOG.md) pour l'historique complet des changements.
 
+### 🐛 Correctif Graphique Historique (v2.9.3)
+
+- **Graphique mensuel vide** : Le coordinateur stockait jusqu'à 36 mois d'historique en local, mais l'injection dans les statistiques HA n'utilisait que les 12 mois retournés par l'API à chaque cycle. Résultat : Janvier, Février, Mars 2026 n'apparaissaient pas dans les graphiques HA. **Corrigé** — l'historique complet est désormais injecté à chaque mise à jour.
+- Après mise à jour : utilisez le bouton **Forcer la mise à jour** pour déclencher l'injection immédiate.
+
 ### 🔧 Corrections & Nouvelles Fonctionnalités (v2.9.0)
 
 #### Corrections Critiques
@@ -188,10 +193,12 @@ Depuis v2.9.0, deux statistic IDs externes sont injectés automatiquement par le
 
 | Statistic ID | Unit | Period | Usage |
 |---|---|---|---|
-| `eau_grand_lyon:water_<ref>` | m³ | Monthly | Historique consommation 36 mois, Energy Dashboard |
-| `eau_grand_lyon:cost_<ref>` | EUR | Monthly | Historique coûts 36 mois (si tarif configuré), suivi budgétaire |
+| `eau_grand_lyon:water_<ref>` | m³ | Monthly | Historique consommation jusqu'à 36 mois, Energy Dashboard |
+| `eau_grand_lyon:cost_<ref>` | EUR | Monthly | Historique coûts jusqu'à 36 mois (si tarif configuré) |
 
 *`<ref>` = votre numéro de contrat (ex: AB1234567890)*
+
+> **Note sur les capteurs annuels** : Le capteur "Consommation annuelle" affiche les **12 derniers mois glissants** (pas l'année civile). Pour suivre la consommation depuis le 1er janvier, utilisez le capteur "Consommation depuis janvier" (`consommation_cumulee_annee`) ou le capteur de coût cumulé.
 
 #### Configuration Pas à Pas
 Pour configurer le tableau de bord Énergie avec coûts, consultez le **[guide complet](lovelace/ENERGY_DASHBOARD_SETUP.md)**.
@@ -208,7 +215,7 @@ En résumé :
 
 #### Troubleshooting
 - ⚠️ Capteurs grisés ? → Paramètres > Appareils et services > Eau du Grand Lyon > Activer
-- 📊 Statistiques vides ? → Attendre 24h après config du tarif, puis redémarrer HA
+- 📊 Statistiques vides ou graphique incomplet ? → Forcer une mise à jour avec le bouton dédié, puis attendre quelques secondes
 - 🔍 Statistic ID inconnu ? → Vérifier `YOURHA/api/statistic_metadata` ou utiliser l'UI directement
 
 Pour plus de détails : voir `lovelace/energy_config.yaml`
@@ -238,7 +245,7 @@ L'intégration fonctionne avec deux types de compteurs :
 
 - **Mise à jour mensuelle** : Les données de consommation sont généralement mises à jour une fois par mois par le service. La vue quotidienne n'est disponible que pour les compteurs Téléo.
 - **Blocage WAF** : L'API officielle peut bloquer les requêtes trop fréquentes. Consultez la section "Mise à jour des données" pour plus de détails.
-- **Données historiques** : Seules les 12 derniers mois de données mensuelles sont disponibles par l'API.
+- **Données historiques API** : L'API Eau du Grand Lyon ne retourne que les 12 derniers mois. L'intégration accumule cependant jusqu'à **36 mois** en cache local persistant — le graphique se remplit progressivement au fil du temps.
 - **Compteurs Standard** : Les détails horaires et alertes temps réel ne sont disponibles que sur compteurs Téléo.
 - **Mode hors-ligne** : En cas d'indisponibilité prolongée (>7 jours), une alerte apparaît dans les réparations HA.
 

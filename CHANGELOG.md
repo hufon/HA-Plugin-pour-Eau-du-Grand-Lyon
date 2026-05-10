@@ -5,6 +5,41 @@ Tous les changements notables apportés à cette intégration seront documentés
 Le format est basé sur [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 et cette intégration adhère au [Versionnage Sémantique](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.3] - 2026-05-11
+
+### Corrections de Bugs
+
+- **Graphique historique vide** : Le coordinateur fusionnait déjà jusqu'à 36 mois de données mensuelles dans `_monthly_history` (store persistant sur disque), mais `_inject_statistics` n'utilisait que les données fraîches de l'API (`contract.get("consommations", [])` — 12 mois max). Résultat : Janvier, Février, Mars 2026 n'apparaissaient jamais dans le graphique HA malgré leur présence dans l'historique interne. Corrigé : `_inject_statistics` utilise désormais `self._monthly_history.get(ref)` pour les deux passes (eau m³ et coût €), avec fallback sur les données fraîches si l'historique étendu est vide. L'historique complet disponible est injecté dès la première mise à jour après cette correction.
+- **Total "13 mois" = 11 m³** : Conséquence directe du bug ci-dessus — la somme visible dans HA ne reflétait que les mois récents. Ce sera corrigé automatiquement au premier cycle de mise à jour.
+
+### Impact Utilisateur
+
+Après mise à jour et **forcer la mise à jour** (bouton `button.eau_du_grand_lyon_forcer_la_mise_a_jour`) :
+- Le graphique mensuel se remplit avec tous les mois présents dans le cache local (jusqu'à 36 mois)
+- Les statistiques HA (`eau_grand_lyon:water_<ref>` et `eau_grand_lyon:cost_<ref>`) sont réinjectées avec l'historique complet
+- Aucune action manuelle supplémentaire n'est nécessaire
+
+### Clarification : Capteurs Annuels (pas un bug)
+
+| Capteur | Valeur | Méthode de calcul |
+|---|---|---|
+| **Consommation annuelle** | ~109 m³ | 12 derniers mois **glissants** (Juin 2025 → Mai 2026) |
+| **Consommation depuis jan.** | ~27 m³ | Somme des mois de l'**année civile 2026** (Jan + Fév + Mar + Avr) |
+| **Coût (depuis jan.)** | ~87 € | `consommation_cumulee_annee × tarif` — cohérent avec le site web |
+
+Ces deux capteurs sont intentionnellement différents. Le label "Année en cours" peut prêter à confusion car il représente une année **glissante**, pas l'année civile.
+
+### Aucun breaking change — mise à jour transparente depuis v2.9.2
+
+---
+
+## [2.9.2] - 2026-05-xx
+
+### Corrections de Bugs
+- Corrections mineures de stabilité (voir commits)
+
+---
+
 ## [2.9.0] - 2026-04-28
 
 ### Corrections de Bugs
