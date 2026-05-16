@@ -127,7 +127,7 @@
         "name": "Yesterday's consumption"
       },
       "index_journalier": {
-        "name": "Daily index (Energy)"
+        "name": "Daily index (Téléo)"
       },
       "conso_moyenne_7j": {
         "name": "Average daily consumption (7d)"
