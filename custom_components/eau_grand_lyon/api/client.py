@@ -80,7 +80,7 @@ class EauGrandLyonApi:
     ) -> None:
         self._session = session
         self._experimental = experimental
-        self._auth = EauGrandLyonAuth(session, email, password, experimental=experimental)
+        self._auth = EauGrandLyonAuth(session, email, password)
         _LOGGER.debug(
             "EauGrandLyonApi initialise - mode=%s",
             "experimental" if experimental else "legacy",
