@@ -284,8 +284,6 @@ class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         daily = self._contract.get("consommations_journalieres", [])
-        # Attributs limités aux 14 derniers jours pour limiter le volume en BDD
-        recent_14 = daily[-14:]
         return {
             "source": self._contract.get("daily_source"),
             "nb_entrées_total": self._contract.get("daily_nb_entries"),
@@ -293,7 +291,7 @@ class EauGrandLyonConso30JSensor(_EauGrandLyonDailyBase):
             "nb_jours_inclus": min(len(daily), 30),
             "derniers_jours": [
                 {"date": e["date"], "consommation_m3": e["consommation_m3"]}
-                for e in recent_14
+                for e in daily[-30:]
             ],
         }
 

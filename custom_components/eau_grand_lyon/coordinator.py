@@ -1012,7 +1012,6 @@ class EauGrandLyonCoordinator(DataUpdateCoordinator[CoordinatorData]):
                 "source": DOMAIN,
                 "statistic_id": cost_statistic_id,
                 "unit_of_measurement": "EUR",
-                "unit_class": "monetary",
             }
 
             cost_stats: list[StatisticData] = []
